@@ -1,8 +1,8 @@
-433 RF Filter
+pilight firmware
 =============
 
-this is an rf receiver prefilter for the raspberry build with an attiny45. it prefilters the received signal to reduce the load for the raspberry that can i.e. run pilight (http://www.pilight.org).
-you be warned: this could potentionally damage your raspberry pi and also other hardware. i take no responsability for anny damages! try at your own risk!
+this is an rf receiver prefilter for pilight build with an ATTiny45 / 85. it prefilters the received signal to reduce the load for pilight (http://www.pilight.org).
+you be warned: this could potentionally damage your raspberry pi and also other hardware. i take no responsability for any damages! use at your own risk!
 
 1. Install avrgcc:
 ------------------
@@ -23,7 +23,7 @@ you be warned: this could potentionally damage your raspberry pi and also other 
 	the shortest expected pulse is the minimal base pulse-width of all your protocols
 	the longest expected pulse is the maximal base pulse-width of all your protocols multiplied by 34
 	
-4. Compile and program attiny:
+4. Compile and program ATTiny:
 ------------------------------
 	make all
 	
@@ -36,11 +36,10 @@ Additional info:
 
 ###Pinout:
 	
-the first schematic protects your raspberry a little bit more, if you think it's needed use this one, i use the second one without resistors. if you want you can even power the attiny with 3.3V, it works, but i think the timing is less accurate.
-	![Schematic](schematic_git.png "Schematic")
-	![Minimalistic schematic](schematic_minimal_git.png "Minimalistic schematic")
+I use this circuit without resistors. if you want you can even power the ATTiny with 3.3V, it works for 4 out 5 ATTiny's, but i think the timing is less accurate.
+	![schematic](circuit.png "schematic")
 
-|  Name  | Raspberry Pi V2 | Attiny45 | 433 Receiver|
+|  Name  | Raspberry Pi V2 | ATTiny45 | 433 Receiver|
 |--------|-----------------|----------|-------------|
 |  MOSI  |       19        |    5     |      -      |
 |  MISO  |       21        |    6     |      -      |
@@ -62,3 +61,17 @@ to change the pins create an .avrduderc file in your home directory containing (
 		mosi  = 10;
 		miso  = 9;
 	;
+
+###ATTiny85
+
+If you want to program an ATTiny85 you need to change the following settings in the Makefile:
+
+```
+MCU=attiny45
+AVRDUDEMCU=t45
+```
+to
+```
+MCU=attiny85
+AVRDUDEMCU=t85
+```
