@@ -1,4 +1,4 @@
-TARGET=pilight_firmware_v2
+TARGET=pilight_firmware_v3
 
 MCU=attiny45
 AVRDUDEMCU=t45

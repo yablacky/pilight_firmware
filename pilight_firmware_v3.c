@@ -1,4 +1,4 @@
-/* attiny45 - 433 MHz prefilter - V 2.0 - written by mercuri0 & CurlyMo */
+/* attiny45 - 433 MHz prefilter - V 3.0 - written by mercuri0 & CurlyMo */
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/power.h>
@@ -32,13 +32,14 @@
 
 #define MIN_PULSELENGTH 		8			//tested to work down to 30us pulsewidth (=2)
 #define MAX_PULSELENGTH 		1600
-#define PLSLEN 					160
+#define PLSLEN 					155
 #define REPEATS					2
-#define VERSION					2
+#define VERSION					3
 
 volatile uint16_t 				ten_us_counter = 0;
 volatile unsigned long 			ten_us_counter1 = 0;
 volatile uint8_t 				valid_buffer = 0x00;
+volatile uint8_t				checksum = 0;
 
 volatile uint16_t 				version = VERSION;
 volatile uint16_t 				bit = 0;
@@ -49,6 +50,7 @@ volatile uint8_t 				nrrepeat = 0;
 volatile uint16_t 				_version = 0;
 volatile uint16_t 				_minplslen = MIN_PULSELENGTH;
 volatile uint16_t 				_maxplslen = MAX_PULSELENGTH;
+volatile uint8_t 				_chksum = 0;
 
 void get_mcusr(void) __attribute__((naked)) __attribute__((section(".init3")));
 void get_mcusr(void) {
@@ -60,6 +62,7 @@ void init_system(void){
 	cli();
 
 	SET(TCCR1, CS12);
+	TCCR1 |= _BV(CS11) |  _BV(CS10);
 	SET(TCCR1, CTC1);
 	OCR1A = OCR1C = 0x14;
 	SET(TIMSK, OCIE1A);
@@ -78,6 +81,15 @@ void init_system(void){
 	power_timer0_disable();
 
 	wdt_enable(WDTO_4S);
+	
+	int hpf = MAX_PULSELENGTH;
+	int lpf = MIN_PULSELENGTH;
+	int ver = VERSION;
+	while(hpf > 10) hpf /= 10;
+	while(lpf > 10) lpf /= 10;
+	while(ver > 10) ver /= 10;
+	checksum = ((ver&0xf)+(lpf&0xf)+(hpf&0xf))&0xf;
+	_chksum = checksum;
 }
 
 int main (void)
@@ -127,10 +139,17 @@ void shift3() {
 	_maxplslen >>= 1;
 }
 
+void shift4() {
+	lsb = 0;
+	bit++;
+	_chksum >>= 1;
+}
+
 void reset() {
 	_version = version;
 	_minplslen = MIN_PULSELENGTH;
 	_maxplslen = MAX_PULSELENGTH;
+	_chksum = checksum;
 	bit = 0;
 	ten_us_counter1 = 0;
 	lsb = 0;
@@ -165,7 +184,7 @@ ISR(TIMER1_COMPA_vect){
 	}
 	if(nrrepeat < REPEATS) {
 		cli();
-		if(bit < 52) {
+		if(bit < 56) {
 			if(bit < 2) {
 				if(state == 0) {
 					send1(PLSLEN/10);
@@ -198,6 +217,15 @@ ISR(TIMER1_COMPA_vect){
 				}
 				if(lsb == 4) {
 					shift3();
+				}
+			}  else if(bit < 54) {
+				if((_chksum&0x0001) == 1) {
+					sendHigh();
+				} else {
+					sendLow();
+				}
+				if(lsb == 4) {
+					shift4();
 				}
 			} else {
 				if(state == 0) {
