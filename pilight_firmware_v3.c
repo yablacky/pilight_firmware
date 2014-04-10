@@ -32,7 +32,7 @@
 
 #define MIN_PULSELENGTH 		8			//tested to work down to 30us pulsewidth (=2)
 #define MAX_PULSELENGTH 		1600
-#define PLSLEN 					155
+#define PLSLEN 					183
 #define REPEATS					2
 #define VERSION					3
 
@@ -41,28 +41,26 @@ volatile unsigned long 			ten_us_counter1 = 0;
 volatile uint8_t 				valid_buffer = 0x00;
 volatile uint8_t				checksum = 0;
 
-volatile uint16_t 				version = VERSION;
 volatile uint16_t 				bit = 0;
 volatile uint8_t 				state = 0;
 volatile uint8_t 				lsb = 0;
 volatile uint8_t 				nrrepeat = 0;
 
 volatile uint16_t 				_version = 0;
-volatile uint16_t 				_minplslen = MIN_PULSELENGTH;
-volatile uint16_t 				_maxplslen = MAX_PULSELENGTH;
+volatile uint16_t 				_minplslen = 0;
+volatile uint16_t 				_maxplslen = 0;
 volatile uint8_t 				_chksum = 0;
 
 void get_mcusr(void) __attribute__((naked)) __attribute__((section(".init3")));
 void get_mcusr(void) {
-  MCUSR = 0;
-  wdt_disable();
+	MCUSR = 0;
+	wdt_disable();
 }
 
 void init_system(void){
 	cli();
 
 	SET(TCCR1, CS12);
-	TCCR1 |= _BV(CS11) |  _BV(CS10);
 	SET(TCCR1, CTC1);
 	OCR1A = OCR1C = 0x14;
 	SET(TIMSK, OCIE1A);
@@ -121,32 +119,27 @@ void send2(int len) {
 	}
 }
 
-void shift1() {
+void shift(int a) {
 	lsb = 0;
 	bit++;
-	_version >>= 1;
-}
-
-void shift2() {
-	lsb = 0;
-	bit++;
-	_minplslen >>= 1;
-}
-
-void shift3() {
-	lsb = 0;
-	bit++;
-	_maxplslen >>= 1;
-}
-
-void shift4() {
-	lsb = 0;
-	bit++;
-	_chksum >>= 1;
+	switch(a) {
+		case 1:
+			_version >>= 1;
+		break;
+		case 2:
+			_minplslen >>= 1;
+		break;
+		case 3:
+			_maxplslen >>= 1;
+		break;
+		case 4:
+			_chksum >>= 1;
+		break;
+	}
 }
 
 void reset() {
-	_version = version;
+	_version = VERSION;
 	_minplslen = MIN_PULSELENGTH;
 	_maxplslen = MAX_PULSELENGTH;
 	_chksum = checksum;
@@ -198,7 +191,7 @@ ISR(TIMER1_COMPA_vect){
 					sendLow();
 				}
 				if(lsb == 4) {
-					shift1();
+					shift(1);
 				}
 			} else if(bit < 34) {
 				if((_minplslen&0x0000000000000001) == 1) {
@@ -207,7 +200,7 @@ ISR(TIMER1_COMPA_vect){
 					sendLow();
 				}
 				if(lsb == 4) {
-					shift2();
+					shift(2);
 				}
 			} else if(bit < 50) {
 				if((_maxplslen&0x0000000000000001) == 1) {
@@ -216,7 +209,7 @@ ISR(TIMER1_COMPA_vect){
 					sendLow();
 				}
 				if(lsb == 4) {
-					shift3();
+					shift(3);
 				}
 			}  else if(bit < 54) {
 				if((_chksum&0x0001) == 1) {
@@ -225,7 +218,7 @@ ISR(TIMER1_COMPA_vect){
 					sendLow();
 				}
 				if(lsb == 4) {
-					shift4();
+					shift(4);
 				}
 			} else {
 				if(state == 0) {
