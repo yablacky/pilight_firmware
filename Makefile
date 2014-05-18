@@ -12,9 +12,9 @@ program : $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex
 	sudo $(AVRDUDE) -p $(AVRDUDEMCU) -P gpio -c gpio -b 10000 -U flash:w:$(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex
 
 compile :
-	$(CC) $(CFLAGS) -c $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex.c
-	$(CC) $(CFLAGS) -o $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex.elf $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex.o
-	$(OBJ2HEX) -j .text -j .data -O ihex $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex.elf $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex.hex
+	$(CC) $(CFLAGS) -c $(TARGET)_$(AVRDUDEMCU)_$(VERSION).c
+	$(CC) $(CFLAGS) -o $(TARGET)_$(AVRDUDEMCU)_$(VERSION).elf $(TARGET)_$(AVRDUDEMCU)_$(VERSION).o
+	$(OBJ2HEX) -j .text -j .data -O ihex $(TARGET)_$(AVRDUDEMCU)_$(VERSION).elf $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex
 
 clean :
 	rm -f *.hex *.obj *.o *.elf
