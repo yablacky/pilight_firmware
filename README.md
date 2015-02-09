@@ -64,14 +64,8 @@ to change the pins create an .avrduderc file in your home directory containing (
 
 ###ATTiny85
 
-If you want to program an ATTiny85 you need to change the following settings in the Makefile:
+If you want to program an ATTiny85 add a parameter when calling make:
 
 ```
-MCU=attiny45
-AVRDUDEMCU=t45
-```
-to
-```
-MCU=attiny85
-AVRDUDEMCU=t85
+Make all type=t85
 ```
