@@ -1,20 +1,26 @@
 TARGET=pilight_firmware
 VERSION=v3
 
-MCU=attiny45
-AVRDUDEMCU=t45
+ifeq ($(type),t85)
+    MCU=attiny85
+    AVRDUDEMCU=t85
+else
+    MCU=attiny45
+    AVRDUDEMCU=t45
+endif
+
 CC=/usr/bin/avr-gcc
 CFLAGS= -mmcu=$(MCU) -DF_CPU=16000000UL -Wall -Os -fno-inline-small-functions -mrelax
 OBJ2HEX=/usr/bin/avr-objcopy
 AVRDUDE=/usr/bin/avrdude
 
-program : $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex
-	sudo $(AVRDUDE) -p $(AVRDUDEMCU) -P gpio -c gpio -b 10000 -U flash:w:$(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex
+program : $(TARGET)_$(AVRDUDEMCU).hex
+	sudo $(AVRDUDE) -p $(AVRDUDEMCU) -P gpio -c gpio -b 10000 -U flash:w:$(TARGET)_$(AVRDUDEMCU).hex
 
 compile :
-	$(CC) $(CFLAGS) -c $(TARGET)_$(AVRDUDEMCU)_$(VERSION).c
-	$(CC) $(CFLAGS) -o $(TARGET)_$(AVRDUDEMCU)_$(VERSION).elf $(TARGET)_$(AVRDUDEMCU)_$(VERSION).o
-	$(OBJ2HEX) -j .text -j .data -O ihex $(TARGET)_$(AVRDUDEMCU)_$(VERSION).elf $(TARGET)_$(AVRDUDEMCU)_$(VERSION).hex
+	$(CC) $(CFLAGS) -c $(TARGET).c
+	$(CC) $(CFLAGS) -o $(TARGET)_$(AVRDUDEMCU).elf $(TARGET).o
+	$(OBJ2HEX) -j .text -j .data -O ihex $(TARGET)_$(AVRDUDEMCU).elf $(TARGET)_$(AVRDUDEMCU).hex
 
 clean :
 	rm -f *.hex *.obj *.o *.elf
