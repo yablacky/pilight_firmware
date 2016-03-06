@@ -22,8 +22,19 @@ compile :
 	$(CC) $(CFLAGS) -o $(TARGET)_$(AVRDUDEMCU).elf $(TARGET).o
 	$(OBJ2HEX) -j .text -j .data -O ihex $(TARGET)_$(AVRDUDEMCU).elf $(TARGET)_$(AVRDUDEMCU).hex
 
+asm :
+	$(CC) $(CFLAGS) -S $(TARGET).c
+
 clean :
 	rm -f *.hex *.obj *.o *.elf
+
+flash : $(TARGET)_$(AVRDUDEMCU).hex
+	sudo pilight-flash --file=$(TARGET)_$(AVRDUDEMCU).hex
+
+$(TARGET)_$(AVRDUDEMCU).hex : $(TARGET).c
+	$(CC) $(CFLAGS) -c $(TARGET).c
+	$(CC) $(CFLAGS) -o $(TARGET)_$(AVRDUDEMCU).elf $(TARGET).o
+	$(OBJ2HEX) -j .text -j .data -O ihex $(TARGET)_$(AVRDUDEMCU).elf $(TARGET)_$(AVRDUDEMCU).hex
 
 all: compile erase program
 #clean
