@@ -1,0 +1,60 @@
+#!/bin/bash
+# pilight_firmware V4 control program.
+# (c) 2016 yablacky <schwarz.ware@gmx.de>
+
+# Define the raspberry-pin (as BCM/GPIO-pin #) that is connected to ATTiny's dip-pin #5:
+FW_CONTROL_PIN=10
+# Pin 10 is the default that is used by pilight-flash.
+# TODO:	Lookup /etc/pilight/config.json for "firmware-gpio-mosi" take that wiring-pi-pin number and convert it to GPIO-pin number.
+
+for OPT ; do case "$OPT" in
+--help|-h|-\?) cat <<-END_OF_HELP >&2
+	Firmware controller for pilight-firmware version 4.
+	Usually this tool must run as root. You are: $(whoami).
+
+	usage: $0 [--help] [--pin=number]
+	 	--help		Print this help.
+	 	--pin=number	Output firmware control signals on
+	 			this raspi BCM/GPIO pin (default $FW_CONTROL_PIN).
+	 			(no space around = allowed!)
+
+	The pilight-firmware controlled by this tool is a micro-controller
+	based signal filter for pilight that tries to remove noise from a
+	433 MHz radio signal.  Each control call selects a new filter method
+	in the micro-controller in this order:
+	 	1 nothing except signatures.
+	 	2 generate test-signal (and signatures).
+	 	3 filter version 3
+	 	4 filter version 4 (default when flashed)
+	The micro-controller remembers the selected filter in EEPROM so the
+	setting should persist during power loss.
+
+	No direct feedback is given about what filter has been selected.
+	Use pilight-raw to check current filter output. If pilight-daemon
+	is running it should recognize the firmware signature which has
+	a version information that includes the selected filter index.
+	END_OF_HELP
+	exit 1
+	;;
+
+--pin=[0-9])		FW_CONTROL_PIN=${OPT#--pin=} ;;
+--pin=[1-3][0-9])	FW_CONTROL_PIN=${OPT#--pin=} ;;
+--pin=*)		echo "$0: invalid pin number. Range is 0..39" >&2
+	exit 1
+	;;
+
+*)	echo "$0: unknown option: $OPT. Please try --help" >&2
+	exit 1
+	;;
+
+esac; done
+
+export ERRMSG="$0: Failed to access GPIO pin. You should try to run this tool as root."
+
+echo ${FW_CONTROL_PIN} >/sys/class/gpio/export			|| echo $ERRMSG
+echo out >/sys/class/gpio/gpio${FW_CONTROL_PIN}/direction	|| echo $ERRMSG
+echo   1 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value		|| echo $ERRMSG
+sleep 1
+echo   0 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value		|| echo $ERRMSG
+echo ${FW_CONTROL_PIN} >/sys/class/gpio/unexport		|| echo $ERRMSG
+
