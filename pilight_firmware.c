@@ -40,6 +40,16 @@
 
 /*********************************************************************
  * Special definitions, specific to this app.
+ **
+ * An early note to global and static variables:
+ * The filter_method_v4() will define a static ring buffer that occupies
+ * almost all of available RAM. The calculation of the that size takes into
+ * account all the known global and static variables that are defined in the
+ * source code. If you add global or static variables to the code then take
+ * care to adjust the size calculation in filter_method_v4() accordingly.
+ * To safe memory it might be possible in some cases to re-use global variables
+ * rather then to define new ones. More information when and how to do this
+ * see notes below at the comment "Variables used by signature sender".
  */
 #define FW_CONTROL				0	// "Firmware control port" -> (DIP pin 5) -> PB0 --> PCINT0
 #define REC_OUT 				4	// "Receivers output port" -> (DIP pin 3) -> PB4 --> PCINT4
@@ -389,8 +399,25 @@ void filter_method_v4(register uint8_t pin_change) {
 
 	static const int8_t FILTER_V4_MIN_RAWLEN = 22;	// Must be less then least RAW_LENGTH of 433 protocols
 							// (currently 41 for ninjablocks_weather)
-	static uint16_t	pulse_ring[80];		// max 80 or so for Attiny 45 (mem would overflow).
-						// 256 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 176 BYTES --> 88 words for ring.
+	// Define ring buffer size as almost large as possibe.  This depends on
+	// available RAM in the target MCU.  Not all of calculates "free" bytes
+	// will be used, at least 8 bytes are left "ununsed" to be on the safe side.
+
+	static uint16_t	pulse_ring[
+#if TARGET_MCU_attiny85
+
+	    200	// 512 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 432 BYTES --> 216 words -> use 200 for ring buffer.
+
+#elif TARGET_MCU_attiny25 
+
+	    16	// 128 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 48 BYTES --> 24 words -> use 16 for ring buffer.
+
+#else /* assume TARGET_MCU_attiny45 */
+
+	    80	// 256 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 176 BYTES --> 88 words -> use 80 for ring buffer.
+
+#endif
+	    ];
 	static int8_t wr_idx, rd_idx, rawlen;	// Note: wr/rd_idx walk through the pulse_ring in reverse order
 						// (from hi to lo values) so boundary check is at zero most of
 						// the time.
