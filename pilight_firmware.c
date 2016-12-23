@@ -130,6 +130,7 @@ void filter_method_nop(register uint8_t pin_change) { /* NOP */ }	// only send s
 void filter_generate_test_signal(register uint8_t pin_change);
 void filter_method_v3(register uint8_t pin_change);
 void filter_method_v4(register uint8_t pin_change);
+void filter_passthru(register uint8_t pin_change);
 
 filter_method_t execute_filter = filter_method_v4;
 
@@ -192,6 +193,7 @@ static filter_method_t get_filter_method(register uint8_t filter_idx) {
 	case 1: return filter_generate_test_signal;
 	case 2: return filter_method_v3;
 	case 3: return filter_method_v4;
+	case 4: return filter_passthru;
 	}
 }
 
@@ -389,10 +391,17 @@ void filter_method_v3(register uint8_t pin_change) {
 				}
 			}
 		}
-		recving_since_10_us = 0;
 		TCNT1 = 0;
 	} // else NOP
 	#undef valid_buffer
+}
+
+void filter_passthru(register uint8_t pin_change) {
+
+	if(pin_change) {
+		send_toggle();
+		TCNT1 = 0;
+	} // else NOP
 }
 
 void filter_method_v4(register uint8_t pin_change) {
@@ -454,7 +463,6 @@ void filter_method_v4(register uint8_t pin_change) {
 				}
 			}
 		}
-		recving_since_10_us = 0;
 	} else if(rd_idx >= 0) {
 		if(rd_idx == wr_idx) {
 			send_single_pulse(0);	// mark pulse end (toggles sender)
@@ -493,6 +501,7 @@ ISR(PCINT0_vect){
 
 	if(GET(pin_change, I_PIN(REC_OUT))) {
 		execute_filter(pin_change);
+		recving_since_10_us = 0;
 	}
 
 	if(GET(pin_change, I_PIN(FW_CONTROL))) {
