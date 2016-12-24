@@ -399,7 +399,11 @@ void filter_method_v3(register uint8_t pin_change) {
 void filter_passthru(register uint8_t pin_change) {
 
 	if(pin_change) {
-		send_toggle();
+		if(recv_ison()) {
+		    send_on();
+		} else {
+		    send_off();
+		}
 		TCNT1 = 0;
 	} // else NOP
 }

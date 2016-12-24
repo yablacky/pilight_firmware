@@ -22,17 +22,25 @@ for OPT ; do case "$OPT" in
 	based signal filter for pilight that tries to remove noise from a
 	433 MHz radio signal.  Each control call selects a new filter method
 	in the micro-controller in this order:
-	 	1 nothing except signatures.
-	 	2 generate test-signal (and signatures).
+	 	1 off, no signals (except signatures).
+	 	2 generate test-signal
 	 	3 filter version 3
 	 	4 filter version 4 (default when flashed)
-	The micro-controller remembers the selected filter in EEPROM so the
-	setting should persist during power loss.
+	 	5 passthru completely unfiltered
+	In any case a signature is generated approximately once per minute.
+	A signature is information that pilight uses to identify the firmware
+	version and filter method being used.
+
+	The micro-controller remembers the selected filter in its EEPROM so
+	the setting should persist during power loss.
 
 	No direct feedback is given about what filter has been selected.
-	Use pilight-raw to check current filter output. If pilight-daemon
-	is running it should recognize the firmware signature which has
-	a version information that includes the selected filter index.
+	If pilight-daemon is running it should recognize the firmware signature
+	which has a version information that includes the selected filter index.
+	This information is stored by pilight-deamon in the config file
+	at /etc/pilight/config.json under registry/pilight/firmware.
+	(Trap: The deamon does not update the config file immediately. You may
+	have to stop/restart the deamon to make it write the config file).
 	END_OF_HELP
 	exit 1
 	;;
