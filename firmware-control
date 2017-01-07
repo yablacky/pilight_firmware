@@ -1,40 +1,67 @@
 #!/bin/bash
-# pilight_firmware V4 control program.
-# (c) 2016 yablacky <schwarz.ware@gmx.de>
+# pilight_firmware V4, V5 control program.
+# (c) 2016-2017 yablacky <schwarz.ware@gmx.de>
 
 # Define the raspberry-pin (as BCM/GPIO-pin #) that is connected to ATTiny's dip-pin #5:
 FW_CONTROL_PIN=10
+FW_FILTER_SELECT=
+FW_VERSION_SELECT=
+
+FW_FILTER_NAME[0]="(the next one)"
+FW_FILTER_NAME[1]="off, no signals (except signatures)"
+FW_FILTER_NAME[2]="generate test signal"
+FW_FILTER_NAME[3]="filter version 3"
+FW_FILTER_NAME[4]="filter version 4"
+FW_FILTER_NAME[5]="passthru unfiltered"
+
+VERBOSE=false
+
 # Pin 10 is the default that is used by pilight-flash.
 # TODO:	Lookup /etc/pilight/config.json for "firmware-gpio-mosi" take that wiring-pi-pin number and convert it to GPIO-pin number.
 
 for OPT ; do case "$OPT" in
 --help|-h|-\?) cat <<-END_OF_HELP >&2
-	Firmware controller for pilight-firmware version 4.
+	Firmware controller for pilight-firmware version 5.
 	Usually this tool must run as root. You are: $(whoami).
 
-	usage: $0 [--help] [--pin=number]
-	 	--help		Print this help.
-	 	--pin=number	Output firmware control signals on
-	 			this raspi BCM/GPIO pin (default $FW_CONTROL_PIN).
-	 			(no space around = allowed!)
+	usage: $0 [options...]
+	  --help, -?, -h	Print this help.
+	  --verbose, -v		Print what is going on.
+	  --pin=number		Output firmware control signals on this
+	 			raspi BCM/GPIO pin (default $FW_CONTROL_PIN).
+	  --filter=number	Directly select the filter of that number.
+	 			Zero selects the next available filter.
+	  --version=number	Select firmware version behaviour (3,4,5 or 6)
+	  (no space around = allowed)
 
 	The pilight-firmware controlled by this tool is a micro-controller
 	based signal filter for pilight that tries to remove noise from a
-	433 MHz radio signal.  Each control call selects a new filter method
-	in the micro-controller in this order:
-	 	1 off, no signals (except signatures).
-	 	2 generate test-signal
-	 	3 filter version 3
-	 	4 filter version 4 (default when flashed)
-	 	5 passthru completely unfiltered
+	433 MHz radio signal.  Following filter methods can be selected:
+$(
+	for ((N=1; N < ${#FW_FILTER_NAME[@]}; N++)) do
+		echo "    $N ${FW_FILTER_NAME[N]}"
+	done
+)
 	In any case a signature is generated approximately once per minute.
 	A signature is information that pilight uses to identify the firmware
 	version and filter method being used.
 
-	The micro-controller remembers the selected filter in its EEPROM so
-	the setting should persist during power loss.
+	Selecting version 3 or 4 will in fact select version 5 with just
+	the filter of the given version (unless --filter is also present).
+	Version 5 is like version 4 but understands more firmware controller
+	commands.
+	Version 6 is like version 5 with an extra low pass filter that works
+	in front of all other filters (even 5 ${FW_FILTER_NAME[5]} !!).
+	This extra filter completely removes spikes from the input signal
+	before feeding the selected filter. Removing spike means that both
+	edges of the spike are removed (other filter ignore the later edge
+	of a spike only and treat the leading edge as true signal).
 
-	No direct feedback is given about what filter has been selected.
+	The micro-controller remembers the selected filter and version in
+	its EEPROM so the setting should persist during power loss.
+
+	No direct feedback is given about what filter or version has been
+	selected.
 	If pilight-daemon is running it should recognize the firmware signature
 	which has a version information that includes the selected filter index.
 	This information is stored by pilight-deamon in the config file
@@ -44,10 +71,21 @@ for OPT ; do case "$OPT" in
 	END_OF_HELP
 	exit 1
 	;;
+-v|--verbose)		VERBOSE=true ;;
 
 --pin=[0-9])		FW_CONTROL_PIN=${OPT#--pin=} ;;
 --pin=[1-3][0-9])	FW_CONTROL_PIN=${OPT#--pin=} ;;
 --pin=*)		echo "$0: invalid pin number. Range is 0..39" >&2
+	exit 1
+	;;
+
+--filter=[0-5])		FW_FILTER_SELECT=${OPT#--filter=} ;;
+--filter=*)		echo "$0: invalid filter number. Range is 0..5" >&2
+	exit 1
+	;;
+
+--version=[3-6])	FW_VERSION_SELECT=${OPT#--version=} ;;
+--version=*)		echo "$0: invalid version number. Range is 3..6" >&2
 	exit 1
 	;;
 
@@ -57,12 +95,86 @@ for OPT ; do case "$OPT" in
 
 esac; done
 
+# Supply default values
+
+if [ "$FW_FILTER_SELECT" = "" ]
+then
+	if [ "$FW_VERSION_SELECT" = "" ]
+	then
+		FW_FILTER_SELECT=0  # next
+	else
+		FW_FILTER_SELECT=15 # keep
+	fi
+fi
+
+if [ "$FW_VERSION_SELECT" = "" ]
+then
+	FW_VERSION_SELECT=0
+fi
+
+DELAY_SHORT=0.05
+DELAY_FINAL=1.0
+DELAY_VALUE[0]=0.05
+DELAY_VALUE[1]=0.20
+
+FW_FILTER_NAME[15]="(keep unchanged)"
+
+FW_VERSION_NAME[0]="(unchanged)"
+FW_VERSION_NAME[5]="5"
+FW_VERSION_NAME[6]="6"
+
+echo "Selecting filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}' and version '${FW_VERSION_NAME[FW_VERSION_SELECT]}'"
+
+CONTROL_VALUE=$(( (0x000F &  FW_FILTER_SELECT)
+                | (0x0070 & ((FW_VERSION_SELECT ? FW_VERSION_SELECT - 2 : 0) << 4))
+		))
+
+$VERBOSE && perl -e 'printf("%s: CONTROL_VALUE=0x%X\n", @ARGV)' "$0" "$CONTROL_VALUE"
+
+BITMASK_VALUE=0x8000
+# Find msb of CONTROL_VALUE:
+for ((; BITMASK_VALUE && !(BITMASK_VALUE & CONTROL_VALUE); BITMASK_VALUE >>= 1 )) do true; done
+
 export ERRMSG="$0: Failed to access GPIO pin. You should try to run this tool as root."
 
-echo ${FW_CONTROL_PIN} >/sys/class/gpio/export			|| echo $ERRMSG
-echo out >/sys/class/gpio/gpio${FW_CONTROL_PIN}/direction	|| echo $ERRMSG
-echo   1 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value		|| echo $ERRMSG
-sleep 1
-echo   0 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value		|| echo $ERRMSG
+$VERBOSE && echo $0: Acquiring GPIO pin ${FW_CONTROL_PIN} for output direction.
+if ! echo ${FW_CONTROL_PIN} >/sys/class/gpio/export
+then
+	echo $ERRMSG
+	exit 1
+fi
+if ! echo out >/sys/class/gpio/gpio${FW_CONTROL_PIN}/direction
+then
+	echo $ERRMSG
+	$VERBOSE && echo $0: Releasing GPIO pin ${FW_CONTROL_PIN}.
+	echo ${FW_CONTROL_PIN} >/sys/class/gpio/unexport	|| echo $ERRMSG
+	exit 1
+fi
+
+# Send bits of CONTROL_VALUE from msb to lsb:
+delay=0
+for ((; BITMASK_VALUE; BITMASK_VALUE >>= 1 )) do
+	bitval=$(((BITMASK_VALUE & CONTROL_VALUE) ? 1 : 0))
+	$VERBOSE && echo $0: Sending H for a $bitval bit after $delay seconds.
+	echo 1 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value	|| echo $ERRMSG
+
+	delay=${DELAY_VALUE[bitval]}
+	sleep $delay
+	$VERBOSE && echo $0: Sending L for the bit after $delay seconds.
+	echo 0 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value	|| echo $ERRMSG
+
+	delay=$DELAY_SHORT
+	sleep $delay
+done
+$VERBOSE && echo $0: Sending H for termination after $delay seconds.
+echo 1 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value	|| echo $ERRMSG
+
+delay=$DELAY_FINAL
+sleep $delay
+$VERBOSE && echo $0: Sending L for termination after $delay seconds.
+echo 0 >/sys/class/gpio/gpio${FW_CONTROL_PIN}/value	|| echo $ERRMSG
+
+
+$VERBOSE && echo $0: Releasing GPIO pin ${FW_CONTROL_PIN}.
 echo ${FW_CONTROL_PIN} >/sys/class/gpio/unexport		|| echo $ERRMSG
 

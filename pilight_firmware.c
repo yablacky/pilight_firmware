@@ -1,4 +1,4 @@
-/* attiny45 - 433 MHz prefilter - V 4.0 - written by mercuri0 & CurlyMo
+/* attiny45 - 433 MHz prefilter - V 6.0 - written by mercuri0 & CurlyMo
  * Completely re-written by yablacky.
  */
 #include <avr/io.h>
@@ -63,12 +63,13 @@
 #define PLSLEN 					225	// unit 1us; used when sending signature.
 #define PULSE_MULTIPLIER			4
 
-#define VERSION					4
+#define VERSION					6	// version 5 if pin_change_in_10_us < 0
 #define SIGNATURES_TOSEND			3
 #define SIGNATURE_EACH_US			60000000	// 1 minute.
 
 #define FW_EEPROM_ADDR_CHECKSUM			1		// leaving EEPROM addr 0 untouched by design.
 #define FW_EEPROM_ADDR_FILTER_METHOD		2		// filter index of execute_filter is stored here.
+#define FW_EEPROM_ADDR_JACKET_LPF		3		// 0 or 1
 
 #define ctrl_ison()		(	GET(I_PORT, I_PIN(FW_CONTROL))!= 0	)
 #define recv_ison()		(	GET(I_PORT, I_PIN(REC_OUT))!= 0		)
@@ -77,6 +78,17 @@
 #define send_on()		(	SET(O_PORT, O_PIN(PI_IN))		)
 #define send_ison()		(	GET(O_PORT, O_PIN(PI_IN)) != 0		)
 
+#define PIN_CHANGE_DELAY_US	MIN_PULSELENGTH
+#if PIN_CHANGE_DELAY_US < 128
+#define PIN_CHANGE_DELAY_T	int8_t
+#else
+#define PIN_CHANGE_DELAY_T	int16_t
+#endif
+
+PIN_CHANGE_DELAY_T		pin_change_in_10_us;	// Remaining time to delay pin change processing.
+							// This enables the new additional LPF method.
+							// Negative value means immediate processing
+							// which is the old LPF method.
 uint16_t			recving_since_10_us;	// Duration of pulse recently received.
 uint16_t			sending_since_10_us;	// Actual duration of pulse currently sent.
 uint16_t			send_duration_10_us;	// Desired duration of pulse currently sent.
@@ -172,7 +184,10 @@ void calc_checksum(register uint8_t filter_idx) {
 	// filter_idx will be zero for "builtin default" filter, not set
 	// via info from EEPROM. Otherwise it is the index of the filter
 	// method.
-	payload_version = VERSION + filter_idx*100;
+	payload_version = VERSION;
+	if(pin_change_in_10_us < 0)
+	    payload_version = VERSION - 1;
+	payload_version += filter_idx * 100;
 
 	int hpf = MAX_PULSELENGTH;
 	int lpf = MIN_PULSELENGTH;
@@ -198,42 +213,152 @@ static filter_method_t get_filter_method(register uint8_t filter_idx) {
 }
 
 void firmware_control(register uint8_t pin_change) {
-	if(pin_change) {
-		if(ctrl_ison()) {
-			// Find current filter and, if found, switch to the next.
-			uint8_t filter_idx = 0;
-			filter_method_t fxn;
-			while((fxn = get_filter_method(filter_idx++)) != 0) {
-				if(fxn != execute_filter)
-					continue;
-				// Current filter method found, get next one:
-				if((	fxn = get_filter_method(filter_idx)) == 0)
-					fxn = get_filter_method(filter_idx = 0);
-				break;
-			}
-			if(fxn != 0) {
-				execute_filter = fxn;
-				calc_checksum(filter_idx + 1);
-
-				uint8_t cs = 0;
-				EEPROM_write_byte(FW_EEPROM_ADDR_FILTER_METHOD, filter_idx);
-				EEPROM_write_byte(FW_EEPROM_ADDR_CHECKSUM, (cs ^= filter_idx));
-			}
-		} else {
-			signature_in_10_us = rdiv10(500);	// in 0.5 ms.
-		}
-	} else {
+	// Firmware control checks for pin change pulses like this:
+	// A HI pulse of 1s .. 2s duration finishes control sequence.
+	// A HI pulse of more than 2s cancels control sequence.
+	// A HI pulse less than 1s is a bit value and the duration is indicator of bit value.
+	#define FW_CONTROL_TIMEBASE_10_US	rdiv10(SIGNATURE_EACH_US)
+	#define FW_CONTROL_HIGH_BIT_10_US	rdiv10( 100000)	    // 100 ms; a 50ms pulse is 0, a 150ms pulse is 1.
+	#define FW_CONTROL_FINISHED_10_US	rdiv10( 900000)	    // 900 ms; a bit less than 1 second.
+	#define FW_CONTROL_TIME_OUT_10_US	rdiv10(2100000)	    // 2.1 seconds
+	#define FW_CONTROL_STARTING_10_US	(FW_CONTROL_TIMEBASE_10_US + FW_CONTROL_TIME_OUT_10_US)
+	#define	pin_change_count		payload_nbits
+	#define control_value			payload_value
+	if(!pin_change) {
 		// If a valid filter index is stored in EEPROM then establish that filter.
 		uint8_t filter_idx, cs = 0;
 		cs ^= (filter_idx = EEPROM_read_byte(FW_EEPROM_ADDR_FILTER_METHOD));
 		if(cs == EEPROM_read_byte(FW_EEPROM_ADDR_CHECKSUM)) {
+
+			pin_change_in_10_us = EEPROM_read_byte(FW_EEPROM_ADDR_JACKET_LPF) ? 0 : -1;
+
 			filter_method_t fxn = get_filter_method(filter_idx);
 			if(fxn != 0) {
 				execute_filter = fxn;
 				calc_checksum(filter_idx + 1);
 			}
 		}
+		return;
 	}
+	// Control pin changed.
+	// Since we get here, the signature sender is not active (it would have
+	// disabled the interrupt that lead us here). So we can re-use the signature
+	// timer to measure timing of firmware control pin changes and thereby
+	// making sure the signature sender stays inactive.
+	if(signature_in_10_us <= FW_CONTROL_TIMEBASE_10_US) {
+		// This is the first control call (since a long time).
+		pin_change_count = 0;
+		control_value = 0;
+	}
+	if(ctrl_ison()) {
+		pin_change_count++;
+		signature_in_10_us = FW_CONTROL_STARTING_10_US;
+		return;
+	}
+	// Pin changed to off.
+	if(pin_change_count == 0) {
+		// Strange situation. Can't trust signature timer. Ignore.
+		return;
+	}
+
+	int32_t duration_10_us = FW_CONTROL_STARTING_10_US - signature_in_10_us;
+	if(duration_10_us < 0) {
+		// Strange situation. Signature time is beyond our starting
+		// time. This should not happen. Leave everything as is.
+		return;
+	}
+
+	if(duration_10_us < FW_CONTROL_FINISHED_10_US) {
+		// Received a bit. Duration is indicator of its value:
+		control_value <<= 1;
+		control_value |= (duration_10_us > FW_CONTROL_HIGH_BIT_10_US);
+		// wait for another pin change
+		signature_in_10_us = FW_CONTROL_STARTING_10_US;
+		return;
+	}
+
+	if (pin_change_count > 16) {
+		// Too much bits sent. Ignore control request.
+		// no return here; we set the signature timer below.
+	} else {
+		// Control sequence finished.
+		// Control_value bit layout is:
+		// FEDCBA9876543210
+		//             ffff = 0x0F; filter index 1 based, 0=next, 0xF = no change.
+		//          vvv     = 0x30; version select; 0 = no change; undefined = no change.
+		// ..........       = unused
+		int8_t modified = 0;
+
+		uint8_t filter_idx = control_value & 0x0F;
+
+		// Version select is mainly to turn on or off the new LPF method
+		// that is represented by version 6 and 5. The value coded in vvv
+		// is the desired version minus 2 because version 1 and 2 are not
+		// available and to have more room for future version numbers that
+		// can be coded in 3 bits (up to version 9, which is 7 + 2)
+		switch((uint8_t)((control_value & 0x70) >> 4)) {
+		case 3-2:
+			if(filter_idx == 0 || filter_idx == 0x0F)
+			    filter_idx = 3;	// 1 based index of filter_method_v3
+			// fall thru
+		case 4-2:
+			if(filter_idx == 0 || filter_idx == 0x0F)
+			    filter_idx = 4;	// 1 based index of filter_method_v4
+			// fall thru
+		case 5-2:
+			if(pin_change_in_10_us >= 0) modified = 1;
+			pin_change_in_10_us = -1; // off
+			break;
+		case 6-2:
+			if(pin_change_in_10_us < 0) modified = 1;
+			pin_change_in_10_us = 0; // on
+			break;
+		}
+
+		filter_method_t fxn;
+		uint8_t find_next;
+
+		if(filter_idx == 0) {
+			// Below, find current filter and, if found, switch to the next.
+			fxn = 0;
+			find_next = 1;
+		} else {
+			// Switch to given filter (or keep unchanged and, below, find current).
+			fxn = get_filter_method(--filter_idx);
+			find_next = 0;
+		}
+
+		if(fxn == 0) {
+			filter_idx = 0;
+			while((fxn = get_filter_method(filter_idx++)) != 0) {
+				if(fxn != execute_filter)
+					continue;
+				// Current filter method found
+				if(!find_next)
+					--filter_idx;
+				else if((fxn = get_filter_method(filter_idx)) == 0)
+					 fxn = get_filter_method(filter_idx = 0);
+				break;
+			}
+			// if (fxn == 0) here, which should never happen, then
+			// (at least) filter index is the first "undefined" number.
+		}
+
+		if(fxn != 0) {
+			if(execute_filter != fxn) modified = 1;
+			execute_filter = fxn;
+		}
+		if(modified) {
+			calc_checksum(filter_idx + 1);
+
+			uint8_t cs = 0;
+			EEPROM_write_byte(FW_EEPROM_ADDR_FILTER_METHOD, filter_idx);
+			EEPROM_write_byte(FW_EEPROM_ADDR_JACKET_LPF, pin_change_in_10_us >= 0);
+			EEPROM_write_byte(FW_EEPROM_ADDR_CHECKSUM, (cs ^= filter_idx));
+		}
+	}
+	// Finally tell soon what we have now.
+	signature_in_10_us = rdiv10(1000);	// in 1 ms.
 }
 
 void init_system(void) {
@@ -296,12 +421,27 @@ void prepare_signature() {
 	lsb = 0;
 }
 
+#define delayed_pin_change_processing() do {		\
+	PIN_CHANGE_DELAY_T t = pin_change_in_10_us;	\
+	if(--t >= 0)					\
+	    __delayed_pin_change_processing(t);		\
+	} while (0)
+void __delayed_pin_change_processing(PIN_CHANGE_DELAY_T t) {
+	pin_change_in_10_us = t;
+	if(t == 0) {
+		execute_filter(1);
+		recving_since_10_us = 0;
+	}
+}
+
 ISR(TIMER1_COMPA_vect) {
 	wdt_reset();
 	recving_since_10_us++;
 
 	if(++sending_since_10_us < send_duration_10_us) {
 		// Do nothing while sending pulse.
+		// ... except:
+		delayed_pin_change_processing();
 
 	} else if(signatures_sent >= SIGNATURES_TOSEND) {
 
@@ -315,10 +455,14 @@ ISR(TIMER1_COMPA_vect) {
 			signature_in_10_us = rdiv10(SIGNATURE_EACH_US);
 			// Stop normal operation: Ignore interrupts from receiver (PCINT0).
 			CLEAR(GIMSK, PCIE);		// disable pin change interrupts.
+			// Turn off delayed pin change processing if it is enabled et al.
+			if(pin_change_in_10_us >= 0)
+				pin_change_in_10_us = 0;
 			// Prepare for sending signature(s).
 			signatures_sent = 0;
 			prepare_signature();
 		} else {
+			delayed_pin_change_processing();
 			// Normal filter operation (indicate from timer, not from a pin_change).
 			execute_filter(0);
 		}
@@ -404,7 +548,6 @@ void filter_passthru(register uint8_t pin_change) {
 		} else {
 		    send_off();
 		}
-		TCNT1 = 0;
 	} // else NOP
 }
 
@@ -504,8 +647,29 @@ ISR(PCINT0_vect){
 	pin_change ^= (pin_state = PINB);
 
 	if(GET(pin_change, I_PIN(REC_OUT))) {
-		execute_filter(pin_change);
-		recving_since_10_us = 0;
+		if (pin_change_in_10_us < 0) {
+			// Old LPF method: immediate pin change processing.
+			execute_filter(pin_change);
+			recving_since_10_us = 0;
+		} else
+			// New LPF method has a different implementation of the
+			// low pass filter. It is able to completely filter
+			// away a pulse spike and works transparently to and
+			// for all filter methods. The high pass filtering is
+			// stil  done within filter methods.
+		if (pin_change_in_10_us == 0) {
+			// The previous pin change (if any) was processed.
+			// Delay processing of the current pin change a litte
+			// so we can check if this is the start of a spike and
+			// should be ignored.
+			pin_change_in_10_us = PIN_CHANGE_DELAY_US;
+		} else {
+			// Pin change too early! The previous pin change was not
+			// yet processed. Ignore the previous and the current
+			// pin change (by doing as if both are processed) because
+			// both are part of a spike.
+			pin_change_in_10_us = 0;
+		}
 	}
 
 	if(GET(pin_change, I_PIN(FW_CONTROL))) {
