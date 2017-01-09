@@ -1,5 +1,5 @@
 /* attiny45 - 433 MHz prefilter - V 6.0 - written by mercuri0 & CurlyMo
- * Completely re-written by yablacky.
+ * Completely re-written by yablacky, 2016-2017.
  */
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -119,17 +119,18 @@ const uint16_t footer[] = {		// Values: send durations in 10 us unit.
 	rdiv10(PLSLEN),			// H duration (finally toggles to L).
 };
 
-#define BIT_HEADER			((typeof(bit)) -countof(header))
-#define BIT_PAYLOAD			0	// MUST BE zero.
-#define BIT_FOOTER			countof(payload)
+// Data index values for signture parts:
+#define DIX_HEADER			((typeof(dix)) -countof(header))
+#define DIX_PAYLOAD			0	// MUST BE zero.
+#define DIX_FOOTER			countof(payload)
 
 // Variables used by signature sender:
 // They can be re-used by filters since filters are not executed while
 // signatures are being sent. The only rule is that filter must not
 // assume a particular value in this variables because filter may change
 // and signatures may have been sent in between.
-int8_t 					bit;		// does not mean "bit of a byte" but pulse-index or payload-index.
-uint8_t 				lsb;		// payload-sub-bit-pulse-index.
+int8_t 					dix;		// current data index.
+uint8_t 				lsb;		// payload-sub-pulse-index.
 uint8_t					payload_nbits;	// number of outstanding bits to send from payload_value.
 uint16_t				payload_value;	// current payload value being sent (modified while sending).
 
@@ -417,7 +418,7 @@ uint8_t send_single_pulse(register uint16_t duration_10_us) {
 void prepare_signature() {
 	send_off();
 	send_duration_10_us = sending_since_10_us = 0;
-	bit = BIT_HEADER;
+	dix = DIX_HEADER;
 	lsb = 0;
 }
 
@@ -456,7 +457,7 @@ ISR(TIMER1_COMPA_vect) {
 			// Stop normal operation: Ignore interrupts from receiver (PCINT0).
 			CLEAR(GIMSK, PCIE);		// disable pin change interrupts.
 			// Turn off delayed pin change processing if it is enabled et al.
-			if(pin_change_in_10_us >= 0)
+			if(pin_change_in_10_us >= 0)	// including 0 in test generates better asm.
 				pin_change_in_10_us = 0;
 			// Prepare for sending signature(s).
 			signatures_sent = 0;
@@ -469,16 +470,16 @@ ISR(TIMER1_COMPA_vect) {
 
 	// Send signature.
 
-	} else if(bit < BIT_PAYLOAD) {
+	} else if(dix < DIX_PAYLOAD) {
 		// Send header
-		bit += send_single_pulse(header[bit - BIT_HEADER]);
+		dix += send_single_pulse(header[dix - DIX_HEADER]);
 
-		if(bit == BIT_PAYLOAD) {
-			payload_nbits = payload[bit++];
-			payload_value = payload[bit];
+		if(dix == DIX_PAYLOAD) {
+			payload_nbits = payload[dix++];
+			payload_value = payload[dix];
 		}
 
-	} else if(bit < BIT_FOOTER) {
+	} else if(dix < DIX_FOOTER) {
 		// Send payload
 
 		// A payload bit is coded in 4 pulses in a pattern like this:
@@ -492,18 +493,18 @@ ISR(TIMER1_COMPA_vect) {
 			lsb = 0;
 			payload_value >>= 1;
 			if(--payload_nbits == 0) {
-				if(++bit < countof(payload)) {
-					payload_nbits = payload[bit++];
-					payload_value = payload[bit];
+				if(++dix < countof(payload)) {
+					payload_nbits = payload[dix++];
+					payload_value = payload[dix];
 				} else {
-					bit = BIT_FOOTER;
+					dix = DIX_FOOTER;
 				}
 			}
 		}
 		
-	} else if(bit < BIT_FOOTER + countof(footer)) {
+	} else if(dix < DIX_FOOTER + countof(footer)) {
 		// Send footer
-		bit += send_single_pulse(footer[bit - BIT_FOOTER]);
+		dix += send_single_pulse(footer[dix - DIX_FOOTER]);
 
 	} else {
 		// Finished sending one signature.
@@ -627,17 +628,37 @@ void filter_generate_test_signal(register uint8_t pin_change) {
 
 	if(! pin_change) {
 		// The test signal are pulses of 2000, 1000, 500, 250, 120, 60 microseconds
-		// each sent 4 times, plus one pulse of 5500 microseconds.
-		// Filter is re-using global lsb and bit variables!
+		// each sent 4 times, plus 2 pulses of 6000 microseconds.
+		// Filter is re-using global lsb and dix variables!
+
+		// Note: In previous version 4 the terminating pulse was 5500 microseconds
+		// and it was only 1 pulse (not 2). But 5500 us were bad to measure with
+		// (at least my) oscilloscope and just 1 pulse makes the test signal an
+		// odd number of pulses. Since each pulse toggles, an odd number of pulses
+		// has the poor effect that every 2nd pulse sequence has opposite hi/lo
+		// values wich is not (or very hard) to trigger with (my) oscilloscope.
+		// So it will be an even number now and each test pulse sequence
+		// definitively starts with a hi pulse that easily can be trigged on.
+		// BTW: This way I found out that firmware generates pulses very
+		// accurate // and that jitter in pulse durations, that are measured
+		// by raspi's pilight (and can be displayed by pilight-raw), is very
+		// likely a problem of pilight's pulse measuring implementation.
+
 		uint16_t pulse = lsb;	// "lsb" * 10 us
 		if(pulse == 0) {
-			pulse = 550;
-			bit = 1;	// this pulse only once.
+			pulse = 600;
 		}
-		if(send_single_pulse(pulse) && (--bit & 3) == 0) {
-			// lsb of 0 is mapped to 5500 (is not storable in 8-bit lsb).
+		if(send_single_pulse(pulse) && (--dix & 3) == 0) {
+			// lsb of 0 is mapped to 600 (is not storable in 8-bit lsb).
 			lsb = lsb ? (lsb >> 1) < 6 ? 0 : (lsb >> 1) : 200;
+			if(lsb == 0) {
+				send_on();
+				dix = 2;
+			} else {
+				dix = 4;
+			}
 		}
+
 	} // else NOP
 }
 
