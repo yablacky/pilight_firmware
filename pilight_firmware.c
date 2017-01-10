@@ -286,7 +286,7 @@ void firmware_control(register uint8_t pin_change) {
 		// Control_value bit layout is:
 		// FEDCBA9876543210
 		//             ffff = 0x0F; filter index 1 based, 0=next, 0xF = no change.
-		//          vvv     = 0x30; version select; 0 = no change; undefined = no change.
+		//          vvv     = 0x70; version select; 0 = no change; undefined = no change.
 		// ..........       = unused
 		int8_t modified = 0;
 
