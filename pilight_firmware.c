@@ -545,9 +545,9 @@ void filter_passthru(register uint8_t pin_change) {
 
 	if(pin_change) {
 		if(recv_ison()) {
-		    send_on();
+			send_on();
 		} else {
-		    send_off();
+			send_off();
 		}
 	} // else NOP
 }
