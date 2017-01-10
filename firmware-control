@@ -52,29 +52,34 @@ $(
 
 	Selecting version 3 or 4 will in fact select version 5 with just
 	the filter of the given version (unless --filter is also present).
-	Version 5 is like version 4 but understands more firmware controller
-	commands.
-	Version 6 is like version 5 with an extra low pass filter that works
-	in front of all other filters (even 5 ${FW_FILTER_NAME[5]} !!).
-	This extra filter completely removes spikes from the input signal
-	before feeding the selected filter. Removing spike means that both
-	edges of the spike are removed (other filter ignore the later edge
-	of a spike only and treat the leading edge as true signal).
+	Selecting version 5 or 6 selects that version and keeps current
+	filter unchanged (unless --filter is also present).
+
+	Version 5 is like version 4 but understands more firmware
+	  controller commands.
+	Version 6 is like version 5 with an extra low pass filter that
+	  works in front of all other filters (even 5 ${FW_FILTER_NAME[5]} !!).
+	  This extra filter completely removes spikes from the input
+	  signal before feeding the selected filter. Removing spike
+	  means that both edges of the spike are removed (other filter
+	  ignore the later edge of a spike only and treat the leading
+	  edge as true signal).
+	The recommended combination is version 6 with filter version 4.
 
 	The micro-controller remembers the selected filter and version in
 	its EEPROM so the setting should persist during power loss.
 
 	No direct feedback is given about what filter or version has been
-	selected.
-	If pilight-daemon is running it should recognize the firmware signature
-	which has a version information that includes the selected filter index.
-	Do either of this to get this information:
+	selected. To get that information ensure pilight-daemon runs when
+	using firmware control and do either of this:
 	- Check the pilight-deamon config file at /etc/pilight/config.json
-	  under registry/pilight/firmware.  Trap: The deamon does not update
-	  the config file immediately. You may have to stop/restart the deamon
-	  to make it write the config file.
+	  under registry/pilight/firmware. Trap: The deamon does not update
+	  the config file immediately. You may have to stop/restart the
+	  deamon to make it write the config file.
 	- Run pilight-receive and watch for a message of "protocol":
 	  "pilight_firmware". This gives you immediate information.
+	The raw version number sent in the signature has follwing format:
+	    (filter_number * 100) + firmware_version
 	END_OF_HELP
 	exit 1
 	;;
@@ -122,6 +127,13 @@ then
 	FW_VERSION_SELECT=0 # keep
 fi
 
+case $FW_VERSION_SELECT in
+3|4)	FW_FILTER_SELECT=$(( FW_FILTER_SELECT == 0 || FW_FILTER_SELECT == 15
+				? $FW_VERSION_SELECT
+				: FW_FILTER_SELECT));
+	FW_VERSION_SELECT=5 ;;
+esac
+
 DELAY_SHORT=0.05
 DELAY_FINAL=1.0
 DELAY_VALUE[0]=0.05
@@ -137,7 +149,7 @@ if [ $FW_FILTER_SELECT = 15 -a $FW_VERSION_SELECT = 0 ]
 then
 	echo "No changes; sending request for immediate signature."
 else
-	echo "Selecting filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}' and version '${FW_VERSION_NAME[FW_VERSION_SELECT]}'"
+	echo "Selecting version '${FW_VERSION_NAME[FW_VERSION_SELECT]}' and filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}'"
 fi
 
 CONTROL_VALUE=$(( (0x000F &  FW_FILTER_SELECT)
