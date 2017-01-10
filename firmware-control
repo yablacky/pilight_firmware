@@ -4,8 +4,8 @@
 
 # Define the raspberry-pin (as BCM/GPIO-pin #) that is connected to ATTiny's dip-pin #5:
 FW_CONTROL_PIN=10
-FW_FILTER_SELECT=
-FW_VERSION_SELECT=
+FW_FILTER_SELECT=15 # keep
+FW_VERSION_SELECT=0 # keep
 
 FW_FILTER_NAME[0]="(the next one)"
 FW_FILTER_NAME[1]="off, no signals (except signatures)"
@@ -20,7 +20,7 @@ VERBOSE=false
 # TODO:	Lookup /etc/pilight/config.json for "firmware-gpio-mosi" take that wiring-pi-pin number and convert it to GPIO-pin number.
 
 for OPT ; do case "$OPT" in
---help|-h|-\?) cat <<-END_OF_HELP >&2
+--help|-h|-\?) less <<-END_OF_HELP >&2
 	Firmware controller for pilight-firmware version 5.
 	Usually this tool must run as root. You are: $(whoami).
 
@@ -30,8 +30,10 @@ for OPT ; do case "$OPT" in
 	  --pin=number		Output firmware control signals on this
 	 			raspi BCM/GPIO pin (default $FW_CONTROL_PIN).
 	  --filter=number	Directly select the filter of that number.
-	 			Zero selects the next available filter.
+	 			0 or 'next' selects the next available filter.
+	 			'keep' explicitly keeps filter unchanged.
 	  --version=number	Select firmware version behaviour (3,4,5 or 6)
+	 			'keep' explicitly keeps version unchanged.
 	  (no space around = allowed)
 
 	The pilight-firmware controlled by this tool is a micro-controller
@@ -42,9 +44,11 @@ $(
 		echo "    $N ${FW_FILTER_NAME[N]}"
 	done
 )
-	In any case a signature is generated approximately once per minute.
-	A signature is information that pilight uses to identify the firmware
-	version and filter method being used.
+	In any case the firmware sends a signature approximately once per
+	minute.  A signature is information that pilight uses to identify
+	the firmware version and filter method being currently used.
+	If no parameters are given the firmware is told to send a signature
+	immediately.
 
 	Selecting version 3 or 4 will in fact select version 5 with just
 	the filter of the given version (unless --filter is also present).
@@ -64,10 +68,13 @@ $(
 	selected.
 	If pilight-daemon is running it should recognize the firmware signature
 	which has a version information that includes the selected filter index.
-	This information is stored by pilight-deamon in the config file
-	at /etc/pilight/config.json under registry/pilight/firmware.
-	(Trap: The deamon does not update the config file immediately. You may
-	have to stop/restart the deamon to make it write the config file).
+	Do either of this to get this information:
+	- Check the pilight-deamon config file at /etc/pilight/config.json
+	  under registry/pilight/firmware.  Trap: The deamon does not update
+	  the config file immediately. You may have to stop/restart the deamon
+	  to make it write the config file.
+	- Run pilight-receive and watch for a message of "protocol":
+	  "pilight_firmware". This gives you immediate information.
 	END_OF_HELP
 	exit 1
 	;;
@@ -79,13 +86,16 @@ $(
 	exit 1
 	;;
 
+--filter=next)		FW_FILTER_SELECT=0 ;;
+--filter=keep)		FW_FILTER_SELECT=15 ;;
 --filter=[0-5])		FW_FILTER_SELECT=${OPT#--filter=} ;;
 --filter=*)		echo "$0: invalid filter number. Range is 0..5" >&2
 	exit 1
 	;;
 
+--version=keep)		FW_VERSION_SELECT=0 ;;
 --version=[3-6])	FW_VERSION_SELECT=${OPT#--version=} ;;
---version=*)		echo "$0: invalid version number. Range is 3..6" >&2
+--version=*)		echo "$0: invalid version number. Range is 3..6 or 'keep'" >&2
 	exit 1
 	;;
 
@@ -109,7 +119,7 @@ fi
 
 if [ "$FW_VERSION_SELECT" = "" ]
 then
-	FW_VERSION_SELECT=0
+	FW_VERSION_SELECT=0 # keep
 fi
 
 DELAY_SHORT=0.05
@@ -123,7 +133,12 @@ FW_VERSION_NAME[0]="(unchanged)"
 FW_VERSION_NAME[5]="5"
 FW_VERSION_NAME[6]="6"
 
-echo "Selecting filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}' and version '${FW_VERSION_NAME[FW_VERSION_SELECT]}'"
+if [ $FW_FILTER_SELECT = 15 -a $FW_VERSION_SELECT = 0 ]
+then
+	echo "No changes; sending request for immediate signature."
+else
+	echo "Selecting filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}' and version '${FW_VERSION_NAME[FW_VERSION_SELECT]}'"
+fi
 
 CONTROL_VALUE=$(( (0x000F &  FW_FILTER_SELECT)
                 | (0x0070 & ((FW_VERSION_SELECT ? FW_VERSION_SELECT - 2 : 0) << 4))
