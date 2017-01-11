@@ -138,16 +138,15 @@ connected) and ISR(TIMER1_COMPA_vect) is called constantly every 10 micro
 seconds (us) which are 0.01 milli seconds (ms). In other words it gets called
 100000 times per second. This is much faster than (usual) input pin changes
 will happen. While no ISR routine is running the firmware does nothing and runs
-a "no operation" loop. For short lets call ISR(PCINT0_vect) = "PCISR" (pin
-change ISR) and ISR(TIMER1_COMPA_vect) = "TIMERISR" ´(timer ISR).
+a "no operation" loop.
 
-The main job of TIMERISR is measuring durations between various events and to
-send the firmware signature about every second. Further it does half the work
-of filter methods.
+The main job of ISR(TIMER1_COMPA_vect) is measuring durations between various
+events and to send the firmware signature about every second. Further it does
+half the work of filter methods.
 
-The job of PCISR is to handle detected pin changes (which may by from receiver
-on some pin or from firmware control program on a different pin) and thereby
-doing the other half of filter methods..
+The job of ISR(PCINT0_vect) is to handle detected pin changes (which may be
+from receiver on some pin or from firmware control program on a different pin)
+and thereby doing the other half of filter methods.
 
 Each filter method is implemented as a separate function. The address of the
 selected filter method's function is present in the global execute_filter variable.
