@@ -108,9 +108,9 @@ firmware-control capabilities (and version 6 LPF disabled, of course).
 Firmware version 6 is like version 5 with version 6 LPF enabled.
 The big picture is:
 
-Version 4 was: Receiver-signal -----------------> selected-filter-method -> Signal-to-raspi
-Version 5 is : Receiver-signal -----------------> selected-filter-method -> Signal-to-raspi
-Version 6 is : Receiver-signal -> version6-LPF -> selected-filter-method -> Signal-to-raspi
+ Version 4 was: Receiver-signal -----------------> selected-filter-method -> Signal-to-raspi
+ Version 5 is : Receiver-signal -----------------> selected-filter-method -> Signal-to-raspi
+ Version 6 is : Receiver-signal -> version6-LPF -> selected-filter-method -> Signal-to-raspi
 
 The firmware-control program can make the firmware to run in version 5 mode or
 in version 6 mode and it now can select a filter method directly (controlling
