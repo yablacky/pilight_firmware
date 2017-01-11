@@ -118,8 +118,8 @@ version 4 was only capable to "select next" filter method).
 
 I got best results with version 6 LPF and filter method version 4: In my
 environment this filters out round about half the false pulse trains that pass
-version 4 resp. 5.  Try it out yourself. If a new filter do not work for your
-environment just use firmware-control to make it behave as an older version.
+version 4 resp. 5.  Try it out yourself. If a new filter does not work for your
+environment, then just use firmware-control to make it behave as an older version.
 
 ###ATTiny85
 
