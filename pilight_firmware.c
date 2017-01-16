@@ -57,7 +57,16 @@
 
 #define PULSE_DIV				34	// pulse divider (from pilight/inc/defines.h)
 #define MIN_PULSELENGTH 			15	// unit 10us	//tested to work down to 20us pulsewidth (=2)
+#if ENABLE_HIGH_PASS_FILTER
+	// Enabling the high pass filter (HPF) is not recommended because
+	// 1) some protocols have valid long length footer pulses.
+	// 2) the pause between pulse trains can be a long "pulse" that the HPF would
+	//    filter away by in fact ignoring the first valid pulse after such a pause.
+	// The HPF code is left here for reference.
 #define MAX_PULSELENGTH 			1600	// unit 10us
+#else
+#define MAX_PULSELENGTH 			0x7fff	// Should be zero but daemon then does not update registry :-(
+#endif
 #define rdiv10(n)				(((n) + 5) / 10)	// convert value of unit 1us to value of unit 10us.
 // values from pilight/protocols/core/pilight_firmware_v3.c:
 #define PLSLEN 					225	// unit 1us; used when sending signature.
@@ -527,7 +536,9 @@ void filter_method_v3(register uint8_t pin_change) {
 		valid_buffer <<= 1;
 		if(recving_since_10_us >= MIN_PULSELENGTH)
 		{
+#if ENABLE_HIGH_PASS_FILTER
 			if(recving_since_10_us <= MAX_PULSELENGTH)
+#endif
 			{
 				valid_buffer |= 0x01;
 				if(valid_buffer == 0xFF)
@@ -580,7 +591,10 @@ void filter_method_v4(register uint8_t pin_change) {
 						// the time.
 	if(pin_change) {
 		if(recving_since_10_us >= MIN_PULSELENGTH
-		&& recving_since_10_us <= MAX_PULSELENGTH) {
+#if ENABLE_HIGH_PASS_FILTER
+		&& recving_since_10_us <= MAX_PULSELENGTH
+#endif
+		) {
 			pulse_ring[wr_idx] = recving_since_10_us;
 			if(--wr_idx < 0)
 				wr_idx = countof(pulse_ring) - 1;
