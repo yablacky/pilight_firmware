@@ -83,7 +83,13 @@
 #define ctrl_ison()		(	GET(I_PORT, I_PIN(FW_CONTROL))!= 0	)
 #define recv_ison()		(	GET(I_PORT, I_PIN(REC_OUT))!= 0		)
 #define send_off()		(     CLEAR(O_PORT, O_PIN(PI_IN))		)
+#if 0
+    // This toggle code works but compiles as 3 assembler statements:
 #define send_toggle()		(    TOGGLE(O_PORT, O_PIN(PI_IN))		)
+#else
+    // On attiny, writing 1 to IN toggles OUT; this compiles as 1 assembler statement:
+#define send_toggle()           (       SET(I_PORT, I_PIN(PI_IN))               )
+#endif
 #define send_on()		(	SET(O_PORT, O_PIN(PI_IN))		)
 #define send_ison()		(	GET(O_PORT, O_PIN(PI_IN)) != 0		)
 
@@ -517,7 +523,6 @@ ISR(TIMER1_COMPA_vect) {
 
 	} else {
 		// Finished sending one signature.
-		send_single_pulse(0);	// mark pulse end (toggles sender);
 
 		if(++signatures_sent < SIGNATURES_TOSEND) {
 			prepare_signature();
