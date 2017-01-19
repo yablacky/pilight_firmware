@@ -63,6 +63,9 @@ $(TARGET)_$(AVRDUDEMCU).hex : $(MCU) $(TARGET).c
 all: compile erase program
 erase:
 	$(AVRDUDE) -p $(AVRDUDEMCU) -P gpio -c gpio -e -U lfuse:w:0xe1:m -U hfuse:w:0xdf:m
+
+pulsi: pulsi.c
+	gcc pulsi.c -o pulsi
 	
 # ATtiny45 (internal 1 MHz clock) 	0x62 	0xdf 
 # ATtiny45 (internal 8 MHz clock) 	0xe2	0xdf 

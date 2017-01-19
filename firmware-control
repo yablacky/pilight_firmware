@@ -6,6 +6,7 @@
 FW_CONTROL_PIN=10
 FW_FILTER_SELECT=15 # keep
 FW_VERSION_SELECT=0 # keep
+FW_RECSEL=0	    # keep
 
 FW_FILTER_NAME[0]="(the next one)"
 FW_FILTER_NAME[1]="off, no signals (except signatures)"
@@ -34,6 +35,7 @@ for OPT ; do case "$OPT" in
 	 			'keep' explicitly keeps filter unchanged.
 	  --version=number	Select firmware version behaviour (3,4,5 or 6)
 	 			'keep' explicitly keeps version unchanged.
+	  --recsel=number	Receiver select (1 or 2).  See info below.
 	  (no space around = allowed)
 
 	The pilight-firmware controlled by this tool is a micro-controller
@@ -80,6 +82,16 @@ $(
 	  "pilight_firmware". This gives you immediate information.
 	The raw version number sent in the signature has follwing format:
 	    (filter_number * 100) + firmware_version
+
+
+	Two radio signal receivers (or devices that generate signals like a
+	receiver) may be connected to the Attiny: A receiver 1 on Attiny dip
+	pin 3 and a secondary receiver 2 on Attiny dip pin 6. The firmware is
+	watching only one of them. Use the --recsel option to select which one.
+	The default after power on is watchin signals of receiver 1.
+	Typically, the pin of receiver 2 is connected to a raspi GPIO pin on
+	which a programm on raspi generates signals for testing the firmware.
+
 	END_OF_HELP
 	exit 1
 	;;
@@ -94,13 +106,19 @@ $(
 --filter=next)		FW_FILTER_SELECT=0 ;;
 --filter=keep)		FW_FILTER_SELECT=15 ;;
 --filter=[0-5])		FW_FILTER_SELECT=${OPT#--filter=} ;;
---filter=*)		echo "$0: invalid filter number. Range is 0..5" >&2
+--filter=*)		echo "$0: invalid filter number. Range is 0..5 or 'keep' or 'next'" >&2
 	exit 1
 	;;
 
 --version=keep)		FW_VERSION_SELECT=0 ;;
 --version=[3-6])	FW_VERSION_SELECT=${OPT#--version=} ;;
 --version=*)		echo "$0: invalid version number. Range is 3..6 or 'keep'" >&2
+	exit 1
+	;;
+
+--recsel=keep)		FW_RECSEL=0 ;;
+--recsel=[12])		FW_RECSEL=${OPT#--recsel=} ;;
+--recsel=*)		echo "$0: invalid receiver select. Valid is 1 or 2 or 'keep'" >&2
 	exit 1
 	;;
 
@@ -129,7 +147,7 @@ fi
 
 case $FW_VERSION_SELECT in
 3|4)	FW_FILTER_SELECT=$(( FW_FILTER_SELECT == 0 || FW_FILTER_SELECT == 15
-				? $FW_VERSION_SELECT
+				? FW_VERSION_SELECT
 				: FW_FILTER_SELECT));
 	FW_VERSION_SELECT=5 ;;
 esac
@@ -145,15 +163,20 @@ FW_VERSION_NAME[0]="(unchanged)"
 FW_VERSION_NAME[5]="5"
 FW_VERSION_NAME[6]="6"
 
-if [ $FW_FILTER_SELECT = 15 -a $FW_VERSION_SELECT = 0 ]
+FW_RECSEL_NAME[0]="(unchanged)"
+FW_RECSEL_NAME[1]="1"
+FW_RECSEL_NAME[2]="2"
+
+if [ $FW_FILTER_SELECT = 15 -a $FW_VERSION_SELECT = 0 -a $FW_RECSEL = 0 ]
 then
 	echo "No changes; sending request for immediate signature."
 else
-	echo "Selecting version '${FW_VERSION_NAME[FW_VERSION_SELECT]}' and filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}'"
+	echo "Selecting version '${FW_VERSION_NAME[FW_VERSION_SELECT]}' and filter '${FW_FILTER_NAME[FW_FILTER_SELECT]}' and receiver '${FW_RECSEL_NAME[FW_RECSEL]}'"
 fi
 
 CONTROL_VALUE=$(( (0x000F &  FW_FILTER_SELECT)
                 | (0x0070 & ((FW_VERSION_SELECT ? FW_VERSION_SELECT - 2 : 0) << 4))
+		| (0x0180 & (FW_RECSEL << 7))
 		))
 
 $VERBOSE && perl -e 'printf("%s: CONTROL_VALUE=0x%X\n", @ARGV)' "$0" "$CONTROL_VALUE"

@@ -18,9 +18,9 @@
 #define CAT(a, ...) 			PRIMITIVE_CAT(a, __VA_ARGS__)
 #define PRIMITIVE_CAT(a, ...) 	a ## __VA_ARGS__
 
-#define SET(a,b)				((a) |=  _BV(b))
-#define CLEAR(a,b)				((a) &= ~_BV(b))
-#define GET(a,b)				((a) & _BV(b))
+#define SETBIT(a,b)				((a) |=  _BV(b))
+#define CLRBIT(a,b)				((a) &= ~_BV(b))
+#define GETBIT(a,b)				((a) & _BV(b))
 #define TOGGLE(a,b)				((a) ^= _BV(b))
 
 // Data-Direction port and pins
@@ -53,6 +53,7 @@
  */
 #define FW_CONTROL				0	// "Firmware control port" -> (DIP pin 5) -> PB0 --> PCINT0
 #define REC_OUT 				4	// "Receivers output port" -> (DIP pin 3) -> PB4 --> PCINT4
+#define REC2_OUT 				1	// "2nd Receivers output port" -> (DIP pin 6) -> PB1 --> PCINT1
 #define PI_IN 					3	// Our output pulses -> PB3 -> (DIP pin 2) -> "PI's input port"
 
 #define PULSE_DIV				34	// pulse divider (from pilight/inc/defines.h)
@@ -80,18 +81,20 @@
 #define FW_EEPROM_ADDR_FILTER_METHOD		2		// filter index of execute_filter is stored here.
 #define FW_EEPROM_ADDR_JACKET_LPF		3		// 0 or 1
 
-#define ctrl_ison()		(	GET(I_PORT, I_PIN(FW_CONTROL))!= 0	)
-#define recv_ison()		(	GET(I_PORT, I_PIN(REC_OUT))!= 0		)
-#define send_off()		(     CLEAR(O_PORT, O_PIN(PI_IN))		)
+uint8_t				receiver_pin_mask;		// PINB mask of selected receiver pin.
+
+#define ctrl_ison()		(	GETBIT(I_PORT, I_PIN(FW_CONTROL))!= 0	)
+#define recv_ison()		(	((I_PORT) & receiver_pin_mask)!= 0	)
+#define send_off()		(	CLRBIT(O_PORT, O_PIN(PI_IN))		)
 #if 0
     // This toggle code works but compiles as 3 assembler statements:
-#define send_toggle()		(    TOGGLE(O_PORT, O_PIN(PI_IN))		)
+#define send_toggle()		(	TOGGLE(O_PORT, O_PIN(PI_IN))		)
 #else
     // On attiny, writing 1 to IN toggles OUT; this compiles as 1 assembler statement:
-#define send_toggle()           (       SET(I_PORT, I_PIN(PI_IN))               )
+#define send_toggle()           (	SETBIT(I_PORT, I_PIN(PI_IN))            )
 #endif
-#define send_on()		(	SET(O_PORT, O_PIN(PI_IN))		)
-#define send_ison()		(	GET(O_PORT, O_PIN(PI_IN)) != 0		)
+#define send_on()		(	SETBIT(O_PORT, O_PIN(PI_IN))		)
+#define send_ison()		(	GETBIT(O_PORT, O_PIN(PI_IN)) != 0	)
 
 #define PIN_CHANGE_DELAY_US	MIN_PULSELENGTH
 #if PIN_CHANGE_DELAY_US < 128
@@ -124,6 +127,7 @@ uint16_t payload[] = {			// Values: pairs of (bit-count, value)
 #define payload_version			payload[1]
 	16, MIN_PULSELENGTH,
 	16, MAX_PULSELENGTH,
+#define rec_pin_feedback(n)		(payload[5] = MAX_PULSELENGTH - (n))
 	4, 0				// checksum filled in at run time.
 #define payload_checksum		payload[countof(payload)-1]
 };
@@ -302,6 +306,7 @@ void firmware_control(register uint8_t pin_change) {
 		// FEDCBA9876543210
 		//             ffff = 0x0F; filter index 1 based, 0=next, 0xF = no change.
 		//          vvv     = 0x70; version select; 0 = no change; undefined = no change.
+		//        rr        = 0x18; receiver select; 0 = no change; undefined = no change.
 		// ..........       = unused
 		int8_t modified = 0;
 
@@ -315,11 +320,11 @@ void firmware_control(register uint8_t pin_change) {
 		switch((uint8_t)((control_value & 0x70) >> 4)) {
 		case 3-2:
 			if(filter_idx == 0 || filter_idx == 0x0F)
-			    filter_idx = 3;	// 1 based index of filter_method_v3
+				filter_idx = 3;	// 1 based index of filter_method_v3
 			// fall thru
 		case 4-2:
 			if(filter_idx == 0 || filter_idx == 0x0F)
-			    filter_idx = 4;	// 1 based index of filter_method_v4
+				filter_idx = 4;	// 1 based index of filter_method_v4
 			// fall thru
 		case 5-2:
 			if(pin_change_in_10_us >= 0) modified = 1;
@@ -364,6 +369,24 @@ void firmware_control(register uint8_t pin_change) {
 			if(execute_filter != fxn) modified = 1;
 			execute_filter = fxn;
 		}
+
+		switch((uint8_t)((control_value & 0x180) >> 7)) {
+		case 1:
+		    if (GETBIT(PCMSK, CAT(PCINT, REC2_OUT))) modified = 1;
+		    CLRBIT(PCMSK, CAT(PCINT, REC2_OUT));
+		    SETBIT(PCMSK, CAT(PCINT, REC_OUT));
+		    receiver_pin_mask = (1 << I_PIN(REC_OUT));
+		    rec_pin_feedback(1);
+		    break;
+		case 2:
+		    if (GETBIT(PCMSK, CAT(PCINT, REC_OUT))) modified = 1;
+		    CLRBIT(PCMSK, CAT(PCINT, REC_OUT));
+		    SETBIT(PCMSK, CAT(PCINT, REC2_OUT));
+		    receiver_pin_mask = (1 << I_PIN(REC2_OUT));
+		    rec_pin_feedback(2);
+		    break;
+		}
+
 		if(modified) {
 			calc_checksum(filter_idx + 1);
 
@@ -379,19 +402,25 @@ void firmware_control(register uint8_t pin_change) {
 
 void init_system(void) {
 
-	TCCR1 |= (1 << CTC1) | (1 << CS12);	// the next 2 in one op.
-//	SET(TCCR1, CTC1);		// if(TIMER1==OCR1A) call ISR(TIMER1_COMPA_vect); if(TIMER1==OCR1C) TIMER1=0;
-//	SET(TCCR1, CS12);		// set TIMER1 prescale: CK/8	(CK=16MHz)
+	TCCR1 |= (1 << CTC1) | (1 << CS12);	// the next 2 in one op (they do not compile to sbi/cbi instructions).
+//	SETBIT(TCCR1, CTC1);		// if(TIMER1==OCR1A) call ISR(TIMER1_COMPA_vect); if(TIMER1==OCR1C) TIMER1=0;
+//	SETBIT(TCCR1, CS12);		// set TIMER1 prescale: CK/8	(CK=16MHz)
 	OCR1A = OCR1C = 20;		// CK/8/20 = CK/160 = 16Mhz / 160 = 100kHz --> interrupt each 10us
-	SET(TIMSK, OCIE1A);
+	SETBIT(TIMSK, OCIE1A);
 
-	PCMSK |= (1 << PCINT0) | (1 << PCINT4);	// the next 2 in one op.
-//	SET(PCMSK, PCINT0);		// care for pin change on DIP pin 5 (firmware control)
-//	SET(PCMSK, PCINT4);		// care for pin change on DIP pin 3 (received pulses)
-	SET(MCUCR, ISC00);		// ISC00->1, ISC01->(hopefully is 0): interrupt on any logical change.
-	SET(GIMSK, PCIE);		// enable pin change interrupts.
+	rec_pin_feedback(0);	// 0 -> indicates that default receiver pin is used.
+	receiver_pin_mask = (1 << I_PIN(REC_OUT));  // initially watch receiver at REC_OUT pin.
+	SETBIT(PCMSK, CAT(PCINT, FW_CONTROL));	// care for pin change caused by firmware control
+	SETBIT(PCMSK, CAT(PCINT, REC_OUT));	// care for pin change caused by receiver 1 output
+//later	SETBIT(PCMSK, CAT(PCINT, REC2_OUT));	// care for pin change caused by receiver 2 output
 
-	SET_OUTPUT(D_PORT, D_PIN(PI_IN));
+	SETBIT(MCUCR, ISC00);		// ISC00->1, ISC01->(hopefully is 0): interrupt on any logical change.
+
+	SET_INPUT(D_PORT, D_PIN(FW_CONTROL));
+	SET_INPUT(D_PORT, D_PIN(REC_OUT));
+	SET_INPUT(D_PORT, D_PIN(REC2_OUT));
+	SET_OUTPUT(D_PORT,D_PIN(PI_IN));
+
 	send_off();
 
 	power_adc_disable();
@@ -406,6 +435,8 @@ void init_system(void) {
 
 	// Start with normal filter operation:
 	signatures_sent = SIGNATURES_TOSEND;
+
+	SETBIT(GIMSK, PCIE);		// enable pin change interrupts.
 }
 
 int main (void)
@@ -470,7 +501,7 @@ ISR(TIMER1_COMPA_vect) {
 		if(signature_in_10_us < 0) {
 			signature_in_10_us = rdiv10(SIGNATURE_EACH_US);
 			// Stop normal operation: Ignore interrupts from receiver (PCINT0).
-			CLEAR(GIMSK, PCIE);		// disable pin change interrupts.
+			CLRBIT(GIMSK, PCIE);		// disable pin change interrupts.
 			// Turn off delayed pin change processing if it is enabled et al.
 			if(pin_change_in_10_us >= 0)	// including 0 in test generates better asm.
 				pin_change_in_10_us = 0;
@@ -528,7 +559,7 @@ ISR(TIMER1_COMPA_vect) {
 			prepare_signature();
 		} else {
 			// Start normal operation: Care for interrupts from receiver (PCINT0).
-			SET(GIMSK, PCIE);		// enable pin change interrupts.
+			SETBIT(GIMSK, PCIE);		// enable pin change interrupts.
 		}
 	}
 }
@@ -686,7 +717,7 @@ ISR(PCINT0_vect){
 	uint8_t pin_change = pin_state;
 	pin_change ^= (pin_state = PINB);
 
-	if(GET(pin_change, I_PIN(REC_OUT))) {
+	if(pin_change & receiver_pin_mask) {
 		if (pin_change_in_10_us < 0) {
 			// Old LPF method: immediate pin change processing.
 			execute_filter(pin_change);
@@ -712,7 +743,7 @@ ISR(PCINT0_vect){
 		}
 	}
 
-	if(GET(pin_change, I_PIN(FW_CONTROL))) {
+	if(GETBIT(pin_change, I_PIN(FW_CONTROL))) {
 		firmware_control(pin_change);
 	}
 }
