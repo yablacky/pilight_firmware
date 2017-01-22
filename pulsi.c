@@ -8,7 +8,7 @@
  * the pilight-daemon to run while pulsi does not.
  */
 
-#define VERSION			"0.1"
+#define VERSION			"0.2"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +21,10 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+
+#ifndef countof
+#define countof(a)		(sizeof(a) / sizeof(a[0]))
+#endif
 
 /*******************************************************
  * Raspberry Pi specific things.
@@ -308,17 +312,68 @@ int pulsi_parse_pulse_spec(int pulsec, char * const * pulsev, useconds_t **pUsec
     return ox;
 }
 
+
+static char* predefined_pulse_train[] =
+{
+    "testsignal"
+    ,	"Testsignal like pilight firmware filter method 2"
+    ,	"2000 2000 2000 2000 "
+	"1000 1000 1000 1000 "
+	" 500  500  500  500 "
+	" 250  250  250  250 "
+	" 120  120  120  120 "
+	"  60   60   60   60 "
+	"6000 6000",
+
+    "signature"
+    ,	"A faked pilight firmware signature (version 9, lpf 10010, hpf 20020)"
+    ,	// header
+	"225  900 "
+
+	// payload
+#define BIT_0	"225 225 225 675 "
+#define BIT_1	"225 675 225 255 "
+
+	BIT_1 BIT_0 BIT_0 BIT_1	// 16 bits version
+	BIT_0 BIT_0 BIT_0 BIT_0 // note lsb first!
+	BIT_0 BIT_0 BIT_0 BIT_0 // Value here: 9
+	BIT_0 BIT_0 BIT_0 BIT_0 // Shows as initial filter
+
+	BIT_1 BIT_0 BIT_0 BIT_1	// 16 bits MIN_PULSELEN
+	BIT_0 BIT_1 BIT_1 BIT_1 // note lsb first!
+	BIT_1 BIT_1 BIT_0 BIT_0 // Value here: 1001.
+	BIT_0 BIT_0 BIT_0 BIT_0 // Shows as lpf: 10010
+
+	BIT_0 BIT_1 BIT_0 BIT_0	// 16 bits MAX_PULSELEN
+	BIT_1 BIT_0 BIT_1 BIT_1 // note lsb first!
+	BIT_1 BIT_1 BIT_1 BIT_0 // Value here: 2002
+	BIT_0 BIT_0 BIT_0 BIT_0 // Shows as hpf: 20020
+
+	BIT_1 BIT_0 BIT_1 BIT_0 // 4 bit checksum (5).
+
+	// trailer
+	"225 7650 225 7650 "
+	,
+#undef BIT_0
+#undef BIT_1
+
+// Add more predefined pulse trains before this commment.
+    NULL
+    , NULL
+    , NULL
+};
+
 /**
  * Print the program help text.
  */
 void print_help()
 {
-    fprintf(stderr,
+    printf(
 	"usage: %s [OPTIONS] pulse_duration...\n"
-	" Let a GPIO pin blink by driving that pin to H and L signals each\n"
-	" after an individual period of time; the so-called pulse durations.\n"
+	" Let a GPIO pin blink by driving that pin to H and L signals after\n"
+	" individual periods of time; the so-called pulse durations.\n"
 	" Typically this tool is used to generate very short pulse durations,\n"
-	" down to about 100µs with suitable accuracy. The longest possible\n"
+	" down to about 60µs with suitable accuracy. The longest possible\n"
 	" pulse is about 71 minutes. A series of pulses is called a pulse train.\n"
 	"Possible options are:\n"
 	"  --gpio-pin=number, -g\n"
@@ -331,10 +386,12 @@ void print_help()
 	"       Do all waiting, even the very last one before exit.\n"
 	"       By default the last wait is skipped if the GPIO pin\n"
 	"       state will not be changed after waiting (e.g. is already L).\n"
-	"  --calibrate=time, -C\n"
-	"       Subtract time (in µs) from each pulse duration.\n"
 	"  --simple-mode, -S\n"
 	"       Use simple unchecked timing mode (what pilight-send does).\n"
+	"  --calibrate=time, -C\n"
+	"       When sleeping to generate a pulse, effectively sleep the given\n"
+	"       time (in µs) shorter each time. Default 0. Applies to simple-\n"
+	"       and non-simple-mode.\n"
 	"  --verbose, -v\n"
 	"       Tell what is going on. More -v tells more.\n"
 	"       NOTE: verbose output degrades accucary of\n"
@@ -346,13 +403,26 @@ void print_help()
 	"    ms  Milli seconds\n"
 	"    s   Seconds\n"
 	"    min Minutes\n"
+	, progname, GPIO_PINS_COUNT - 1);
+
+    if (predefined_pulse_train[0]) {
+	printf(
+	    "If only one pulse_duration is given, it can be a name of a\n"
+	    "predefined pulse train:\n");
+	int ii;
+	for (ii = 0; predefined_pulse_train[ii]; ii += 3) {
+	    printf("    %-16s - %s.\n", predefined_pulse_train[ii+0], predefined_pulse_train[ii+1]);
+	}
+    }
+
+    printf(
 	"Environment variables can be used to define different\n"
 	"default values for some options:\n"
 	"    PULSI_GPIO_PIN_NUMBER=number\n"
 	"    PULSI_PRIO_RISE=prio_rise\n"
 	"    PULSI_CALIBRATION=duration_in_microseconds\n"
 	"This is version %s as of %s %s.\n"
-	, progname, GPIO_PINS_COUNT - 1, VERSION, __DATE__, __TIME__);
+	, VERSION, __DATE__, __TIME__);
 }
 
 /**
@@ -432,8 +502,24 @@ int main(int argc, char **argv)
 
     // Get all the pulse durations as micro second values:
  
+    int pulsec = -1;
     useconds_t *pulsev = NULL, pulse_duration_min, pulse_duration_max;
-    int pulsec = pulsi_parse_pulse_spec(argc - optind, argv + optind, &pulsev);
+    if (argc - optind == 1) {
+	int ii = 0;
+	for (ii = 0; predefined_pulse_train[ii]; ii += 3)
+	    if (strcasecmp(argv[optind], predefined_pulse_train[ii]) == 0)
+		break;
+	if (!predefined_pulse_train[ii]) {
+	    fprintf(stderr, "%s: No such predefined pulse train: '%s'\n", argv[optind]);
+	    pulsec = -1;
+	} else {
+	    if (verbose) printf("Using pulse train '%s' (%s)\n",
+			    predefined_pulse_train[ii], predefined_pulse_train[ii+1]);
+	    pulsec = pulsi_parse_pulse_spec(1, &predefined_pulse_train[ii+2], &pulsev);
+	}
+    } else {
+	pulsec = pulsi_parse_pulse_spec(argc - optind, argv + optind, &pulsev);
+    }
 
     if (pulsec < 0)
 	exit(EXIT_FAILURE); // error message already printed.
@@ -447,6 +533,7 @@ int main(int argc, char **argv)
     }
     // from here on, free(pulsev) must be called on return.
 
+    // Determine shortest and longest pulse duration for logging purposes.
     {
 	int ii = pulsec;
 	pulse_duration_min = pulse_duration_max = pulsev[--ii];
@@ -470,8 +557,9 @@ int main(int argc, char **argv)
     useconds_t wait_correction = 0;
     useconds_t cur_pulse_duration = 0;
 
-    if (verbose) printf("Will generate pulses using %s mode.\n",
-				simple_mode ? "simple timing" : "accurate timing");
+    if (verbose) printf("Will generate pulses using %s mode.\n"
+			"Using sleep calibration of %u µs (sleep that shorter)\n",
+			simple_mode ? "simple timing" : "accurate timing", calibration);
 
     // Care for initial output pin state
 
@@ -481,6 +569,7 @@ int main(int argc, char **argv)
     }
 
     // Loop to actually generate pulses
+    if (verbose) printf("Generating pulses...\n");
 
     int ox = 1; // output pulse index (1-based, total, including repeats)
     int rep;    // repeat index.
@@ -553,23 +642,10 @@ int main(int argc, char **argv)
 		    } else {
 			loop_duration -= slept_duration;
 		    }
-		    // Calculate mean value of at most 100 loops. This (1) prevents
-		    // numeric overflow and (2) considers timing changes caused due
-		    // to process schedule.
-#if 0
-		    mean_loop_samples = ox;
-		    if (mean_loop_duration && mean_loop_samples >= ((useconds_t)~0 / mean_loop_duration)) {
-			// With current mean_loop_samples the multiplication and sum calculated
-			// below would overflow. We typically have millions of samples
-			// in this case so just use one less.
-			mean_loop_samples--;
-		    }
-#else
-		    // Keep the initially set mean_loop_samples unchanged. This will
-		    // give each loop the same weight in mean value calculation and
-		    // has the advantage of (1) no overflow in calculation might happen
-		    // and (2) it better adjusts timing changes due to process scheduling.
-#endif
+		    // Calculate mean value of at most 100 loops (or whatever number is
+		    // setup in mean_loop_samples). This (1) prevents numeric overflow
+		    // and (2) considers timing changes caused due to process schedule.
+
 		    // If the current duration differs from mean duration too much,
 		    // then ignore current duration, do not pollute mean value.
 		    useconds_t delta = mean_loop_duration > loop_duration
@@ -603,7 +679,7 @@ int main(int argc, char **argv)
 	}
     }
 
-    if (verbose == 1 && rep > 1 && !simple_mode) printf("\n");
+    if (verbose == 1 && repeat > 1 && !simple_mode) printf("\n");
 
     // Ensure we leave with L output.
     if (simple_mode) {
@@ -630,7 +706,7 @@ int main(int argc, char **argv)
 
     if (verbose > 1) printf("pulse end: pin %d: L (until changed by someone else)\n", pin);
 
-    if (verbose) printf("Pulses in train: %d, total pulses sent: %d, "
+    if (verbose) printf("Pulses in train: %d, total pulses generated: %d, "
 			"shortest %u µs, longest %u µs.\n",
 			pulsec, ox - 1, pulse_duration_min, pulse_duration_max);
 
