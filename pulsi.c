@@ -504,7 +504,7 @@ int main(int argc, char **argv)
  
     int pulsec = -1;
     useconds_t *pulsev = NULL, pulse_duration_min, pulse_duration_max;
-    if (argc - optind == 1) {
+    if (argc - optind == 1 && !isdigit(argv[optind][0])) {
 	int ii = 0;
 	for (ii = 0; predefined_pulse_train[ii]; ii += 3)
 	    if (strcasecmp(argv[optind], predefined_pulse_train[ii]) == 0)
