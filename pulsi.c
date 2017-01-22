@@ -653,7 +653,7 @@ int main(int argc, char **argv)
 				     : loop_duration - mean_loop_duration;
 		    if (delta < 8 * mean_loop_duration) {
 			mean_loop_duration = (mean_loop_duration * (mean_loop_samples - 1)
-				    + loop_duration + (mean_loop_samples >> 2)) / mean_loop_samples;
+				    + loop_duration + (mean_loop_samples >> 1)) / mean_loop_samples;
 		    }
 		}
 		wait_correction = mean_loop_duration;
