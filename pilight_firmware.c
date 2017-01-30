@@ -740,7 +740,7 @@ void filter_method_v4(register uint8_t pin_change) {
 	    ];
 
 #define	PULSE_RING_IDX		(countof(pulse_ring) - 1)	// Bitmask to calc ring buffer index modulo.
-#define PULSE_RING_SLEEP	128	// Must be 1 bit and less then max ring buffer index (127 on attiny 85).
+#define PULSE_RING_SLEEP	128	// Must be 1 bit and above max ring buffer index (127 on attiny 85).
 
 	static uint8_t wr_idx,	// write index; where to store the next received pulse.
 		       rd_idx,	// read index, which pulse to send next.
