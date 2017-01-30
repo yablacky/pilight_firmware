@@ -8,7 +8,7 @@
  * the pilight-daemon to run while pulsi does not.
  */
 
-#define VERSION			"0.2"
+#define VERSION			"0.3"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -453,16 +453,20 @@ int main(int argc, char **argv)
 	char *more = "";
 	switch (opt) {
 	case 'v': verbose++; break;
-	case 'r': repeat    = atoi(optarg); break;
-	case 'g': pin       = atoi(optarg); break;
-	case 'p': prio_rise = atoi(optarg); break;
-	case 'C': calibration  = atoi(optarg); break;
+	case 'r': repeat      = strtol(optarg, &more, 0); break;
+	case 'g': pin         = strtol(optarg, &more, 0); break;
+	case 'p': prio_rise   = strtol(optarg, &more, 0); break;
+	case 'C': calibration = strtol(optarg, &more, 0); break;
 	case 'A': do_last_sleep = 1; break;
 	case 'S': simple_mode=1; break;
 	case 'h': print_help(progname);
 	    // fall thru
 	default:
 	    exit(EXIT_FAILURE);
+	}
+	if (*more) {
+		fprintf(stderr, "%s: -%c requires numeric argument; found %s\n", progname, opt, more);
+		exit(EXIT_FAILURE);
 	}
     }
     if (pin < 0 || pin >= GPIO_PINS_COUNT) {
@@ -557,9 +561,9 @@ int main(int argc, char **argv)
     useconds_t wait_correction = 0;
     useconds_t cur_pulse_duration = 0;
 
-    if (verbose) printf("Will generate pulses using %s mode.\n"
+    if (verbose) printf("Will generate pulses using %s mode on pin %d.\n"
 			"Using sleep calibration of %u µs (sleep that shorter)\n",
-			simple_mode ? "simple timing" : "accurate timing", calibration);
+			simple_mode ? "simple timing" : "accurate timing", pin, calibration);
 
     // Care for initial output pin state
 
@@ -672,9 +676,9 @@ int main(int argc, char **argv)
 		cur_pulse_duration = pulsev[ix];
 
 		if (verbose > 1) printf(verbose > 1
-		    ? "pulse %3d: pin %d: %s (for %12u µs) [mean loop duration=%12u µs]\n"
-		    : "pulse %3d: pin %d: %s (for %12u µs)\n",
-			ox, pin, pin_state ? "H" : "L", cur_pulse_duration, mean_loop_duration);
+		    ? "pulse %3d: %s (for %12u µs) [mean loop duration=%12u µs]\n"
+		    : "pulse %3d: %s (for %12u µs)\n",
+			ox, pin_state ? "H" : "L", cur_pulse_duration, mean_loop_duration);
 	    }
 	}
     }
@@ -704,9 +708,9 @@ int main(int argc, char **argv)
 	}
     }
 
-    if (verbose > 1) printf("pulse end: pin %d: L (until changed by someone else)\n", pin);
+    if (verbose > 1) printf("pulse end: L (until changed by someone else)\n");
 
-    if (verbose) printf("Pulses in train: %d, total pulses generated: %d, "
+    if (verbose) printf("Pulses in train: %d, total pulses (pin changes) generated: %d, "
 			"shortest %u µs, longest %u µs.\n",
 			pulsec, ox - 1, pulse_duration_min, pulse_duration_max);
 

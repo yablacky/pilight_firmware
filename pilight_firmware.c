@@ -51,6 +51,11 @@
  * rather then to define new ones. More information when and how to do this
  * see notes below at the comment "Variables used by signature sender".
  */
+
+#ifndef USE_MANUALLY_OPTIMIZED_CODE
+#define USE_MANUALLY_OPTIMIZED_CODE		1	// 1 or 0
+#endif
+
 #define FW_CONTROL				0	// "Firmware control port" -> (DIP pin 5) -> PB0 --> PCINT0
 #define REC_OUT 				4	// "Receivers output port" -> (DIP pin 3) -> PB4 --> PCINT4
 #define REC2_OUT 				1	// "2nd Receivers output port" -> (DIP pin 6) -> PB1 --> PCINT1
@@ -75,7 +80,11 @@
 
 #define VERSION					6	// version 5 if pin_change_in_10_us < 0
 #define SIGNATURES_TOSEND			3
+#ifndef DEBUG_FILTER
 #define SIGNATURE_EACH_US			60000000	// 1 minute.
+#else
+#define SIGNATURE_EACH_US			(60000000*15)	// 15 minutes.
+#endif
 
 #define FW_EEPROM_ADDR_CHECKSUM			1		// leaving EEPROM addr 0 untouched by design.
 #define FW_EEPROM_ADDR_FILTER_METHOD		2		// filter index of execute_filter is stored here.
@@ -107,6 +116,8 @@ PIN_CHANGE_DELAY_T		pin_change_in_10_us;	// Remaining time to delay pin change p
 							// This enables the new additional LPF method.
 							// Negative value means immediate processing
 							// which is the old LPF method.
+
+uint8_t				ten_us_clock;		// 255 -> 0 ok. Allows to measure 2.56 ms durations.
 uint16_t			recving_since_10_us;	// Duration of pulse recently received.
 uint16_t			sending_since_10_us;	// Actual duration of pulse currently sent.
 uint16_t			send_duration_10_us;	// Desired duration of pulse currently sent.
@@ -171,7 +182,8 @@ filter_method_t execute_filter = filter_method_v4;
  * http://www.atmel.com/webdoc/AVRLibcReferenceManual/FAQ_1faq_softreset.html
  */
 void wdt_init(void) __attribute__((naked)) __attribute__((section(".init3")));
-void wdt_init(void) {
+void wdt_init(void)
+{
 	MCUSR = 0;
 	wdt_disable();
 }
@@ -199,8 +211,8 @@ void EEPROM_write_byte(register uint8_t address, register uint8_t data)
 	SREG = savedSREG;		// Restore interrupt enable flag (and all others).
 }
 
-void calc_checksum(register uint8_t filter_idx) {
-
+void calc_checksum(register uint8_t filter_idx)
+{
 	// filter_idx will be zero for "builtin default" filter, not set
 	// via info from EEPROM. Otherwise it is the index of the filter
 	// method.
@@ -218,7 +230,8 @@ void calc_checksum(register uint8_t filter_idx) {
 	payload_checksum = (ver + lpf + hpf) & 0xf;
 }
 
-static filter_method_t get_filter_method(register uint8_t filter_idx) {
+static filter_method_t get_filter_method(register uint8_t filter_idx)
+{
 	// The filter index of current execute_filter is store in EEPROM so that
 	// it remains after power off.
 	// The indexes are defined herein; do not change them without good reason.
@@ -232,7 +245,8 @@ static filter_method_t get_filter_method(register uint8_t filter_idx) {
 	}
 }
 
-void firmware_control(register uint8_t pin_change) {
+void firmware_control(register uint8_t pin_change)
+{
 	// Firmware control checks for pin change pulses like this:
 	// A HI pulse of 1s .. 2s duration finishes control sequence.
 	// A HI pulse of more than 2s cancels control sequence.
@@ -297,7 +311,7 @@ void firmware_control(register uint8_t pin_change) {
 		return;
 	}
 
-	if (pin_change_count > 16) {
+	if(pin_change_count > 16) {
 		// Too much bits sent. Ignore control request.
 		// no return here; we set the signature timer below.
 	} else {
@@ -361,7 +375,7 @@ void firmware_control(register uint8_t pin_change) {
 					 fxn = get_filter_method(filter_idx = 0);
 				break;
 			}
-			// if (fxn == 0) here, which should never happen, then
+			// if(fxn == 0) here, which should never happen, then
 			// (at least) filter index is the first "undefined" number.
 		}
 
@@ -372,14 +386,14 @@ void firmware_control(register uint8_t pin_change) {
 
 		switch((uint8_t)((control_value & 0x180) >> 7)) {
 		case 1:
-		    if (GETBIT(PCMSK, CAT(PCINT, REC2_OUT))) modified = 1;
+		    if(GETBIT(PCMSK, CAT(PCINT, REC2_OUT))) modified = 1;
 		    CLRBIT(PCMSK, CAT(PCINT, REC2_OUT));
 		    SETBIT(PCMSK, CAT(PCINT, REC_OUT));
 		    receiver_pin_mask = (1 << I_PIN(REC_OUT));
 		    rec_pin_feedback(1);
 		    break;
 		case 2:
-		    if (GETBIT(PCMSK, CAT(PCINT, REC_OUT))) modified = 1;
+		    if(GETBIT(PCMSK, CAT(PCINT, REC_OUT))) modified = 1;
 		    CLRBIT(PCMSK, CAT(PCINT, REC_OUT));
 		    SETBIT(PCMSK, CAT(PCINT, REC2_OUT));
 		    receiver_pin_mask = (1 << I_PIN(REC2_OUT));
@@ -400,8 +414,8 @@ void firmware_control(register uint8_t pin_change) {
 	signature_in_10_us = rdiv10(1000);	// in 1 ms.
 }
 
-void init_system(void) {
-
+void init_system(void)
+{
 	TCCR1 |= (1 << CTC1) | (1 << CS12);	// the next 2 in one op (they do not compile to sbi/cbi instructions).
 //	SETBIT(TCCR1, CTC1);		// if(TIMER1==OCR1A) call ISR(TIMER1_COMPA_vect); if(TIMER1==OCR1C) TIMER1=0;
 //	SETBIT(TCCR1, CS12);		// set TIMER1 prescale: CK/8	(CK=16MHz)
@@ -450,29 +464,14 @@ int main (void)
 	}
 }
 
-uint8_t send_single_pulse(register uint16_t duration_10_us) {
-
-	if(sending_since_10_us < duration_10_us) {
-		send_duration_10_us = duration_10_us;
-		return 0;	// pulse need more sending time.
-	}
-	send_toggle();
-	send_duration_10_us = sending_since_10_us = 0;
-	return 1;		// pulse completely sent.
-}
-
-void prepare_signature() {
-	send_off();
-	send_duration_10_us = sending_since_10_us = 0;
-	dix = DIX_HEADER;
-	lsb = 0;
-}
+#define send_continue_pulse(duration) (void)(send_duration_10_us = (duration))
+#define send_single_pulse(duration) (void)(send_toggle(), send_continue_pulse(duration))
 
 #define delayed_pin_change_processing() do {		\
 	PIN_CHANGE_DELAY_T t = pin_change_in_10_us;	\
 	if(--t >= 0)					\
 	    __delayed_pin_change_processing(t);		\
-	} while (0)
+	} while(0)
 void __delayed_pin_change_processing(PIN_CHANGE_DELAY_T t) {
 	pin_change_in_10_us = t;
 	if(t == 0) {
@@ -481,51 +480,26 @@ void __delayed_pin_change_processing(PIN_CHANGE_DELAY_T t) {
 	}
 }
 
-ISR(TIMER1_COMPA_vect) {
-	wdt_reset();
-	recving_since_10_us++;
+void prepare_signature()
+{
+	dix = DIX_HEADER;
+	lsb = 0;
+}
 
-	if(++sending_since_10_us < send_duration_10_us) {
-		// Do nothing while sending pulse.
-		// ... except:
-		delayed_pin_change_processing();
-
-	} else if(signatures_sent >= SIGNATURES_TOSEND) {
-
-		signature_in_10_us -= send_duration_10_us;
-		// Set send_duration_10_us = 1 rather than 0 because this value is
-		// used to subtract from signature_in_10_us above, in case it is not
-		// changed by execute_filter().
-		send_duration_10_us = 1;
-
-		if(signature_in_10_us < 0) {
-			signature_in_10_us = rdiv10(SIGNATURE_EACH_US);
-			// Stop normal operation: Ignore interrupts from receiver (PCINT0).
-			CLRBIT(GIMSK, PCIE);		// disable pin change interrupts.
-			// Turn off delayed pin change processing if it is enabled et al.
-			if(pin_change_in_10_us >= 0)	// including 0 in test generates better asm.
-				pin_change_in_10_us = 0;
-			// Prepare for sending signature(s).
-			signatures_sent = 0;
-			prepare_signature();
-		} else {
-			delayed_pin_change_processing();
-			// Normal filter operation (indicate from timer, not from a pin_change).
-			execute_filter(0);
-		}
-
-	// Send signature.
-
-	} else if(dix < DIX_PAYLOAD) {
+void send_signatures()
+{
+	if(dix < DIX_PAYLOAD) {
 		// Send header
-		dix += send_single_pulse(header[dix - DIX_HEADER]);
+		send_single_pulse(header[dix - DIX_HEADER]);
 
-		if(dix == DIX_PAYLOAD) {
+		if(++dix == DIX_PAYLOAD) {
 			payload_nbits = payload[dix++];
 			payload_value = payload[dix];
 		}
+		return;
+	}
 
-	} else if(dix < DIX_FOOTER) {
+	if(dix < DIX_FOOTER) {
 		// Send payload
 
 		// A payload bit is coded in 4 pulses in a pattern like this:
@@ -533,9 +507,10 @@ ISR(TIMER1_COMPA_vect) {
 		//         a 0 bit: P  P   P  PPP (short, short, short, long)
 		//         a 1 bit: P  PPP P  P   (short, long, short, short)
 
-		if(send_single_pulse(
-				(lsb == ((payload_value & 1) ? 1 : 3)) ? rdiv10(PLSLEN*3) : rdiv10(PLSLEN)
-			) && ++lsb == 4) {
+		send_single_pulse(
+			(lsb == ((payload_value & 1) ? 1 : 3)) ? rdiv10(PLSLEN*3) : rdiv10(PLSLEN)
+		);
+		if(++lsb == 4) {
 			lsb = 0;
 			payload_value >>= 1;
 			if(--payload_nbits == 0) {
@@ -547,21 +522,114 @@ ISR(TIMER1_COMPA_vect) {
 				}
 			}
 		}
-		
-	} else if(dix < DIX_FOOTER + countof(footer)) {
-		// Send footer
-		dix += send_single_pulse(footer[dix - DIX_FOOTER]);
-
-	} else {
-		// Finished sending one signature.
-
-		if(++signatures_sent < SIGNATURES_TOSEND) {
-			prepare_signature();
-		} else {
-			// Start normal operation: Care for interrupts from receiver (PCINT0).
-			SETBIT(GIMSK, PCIE);		// enable pin change interrupts.
-		}
+		return;
 	}
+
+	if(dix < DIX_FOOTER + countof(footer)) {
+		// Send footer
+		send_single_pulse(footer[dix - DIX_FOOTER]);
+		dix++;
+		return;
+	}
+
+	// Finished sending one signature.
+
+	if(++signatures_sent < SIGNATURES_TOSEND) {
+		prepare_signature();
+		return;
+	}
+
+	// Finished sending all signatures.
+
+	// Leave with sender off.
+	if(send_ison())
+		send_single_pulse(9);
+
+	signature_in_10_us = rdiv10(SIGNATURE_EACH_US);
+
+	// Start normal operation: Care for interrupts from receiver (PCINT0).
+	SETBIT(GIMSK, PCIE);	// enable pin change interrupts.
+}
+
+ISR(TIMER1_COMPA_vect) {
+	wdt_reset();
+
+#if USE_MANUALLY_OPTIMIZED_CODE
+	// Better asm code than the #else path.
+	// (saves one superfluous compare op).
+	register uint8_t t;
+	if((t = ten_us_clock + 1) == 0)
+		signature_in_10_us -= 256;
+	ten_us_clock = t;
+#else
+	if(++ten_us_clock == 0)
+		signature_in_10_us -= 256;
+#endif
+
+	if(++recving_since_10_us == 0) // overflow
+		recving_since_10_us = ~0;
+	
+	// Note that sending_since_10_us can't overflow because it will
+	// not even reach send_duration_10_us which can be 0xFFFF max.
+
+	if(++sending_since_10_us < send_duration_10_us) {
+		// Do nothing while sending pulse.
+		// ... except:
+		delayed_pin_change_processing();
+		return;
+	}
+	sending_since_10_us = 0;
+
+	// Duration of current pulse is over. To terminate the pulse,
+	// the sender pin needs to be toggled. This is not done here,
+	// because in some cases this must regularly not happen. So
+	// this is left to be done by the remaining code.
+
+	// If signature sender is active, continue sending signature pulses:
+	if(signatures_sent < SIGNATURES_TOSEND) {
+		send_signatures();
+		return;
+	}
+
+	// Signature sender is not active.
+#if USE_MANUALLY_OPTIMIZED_CODE
+	// Better asm code than the #else path.
+	// (does not load all 4 bytes in registers; only the most significant one which contains the sign)
+	if(((int8_t*)&signature_in_10_us)[sizeof(signature_in_10_us)-1] < 0)
+#else
+	if(signature_in_10_us < 0)
+#endif
+	{
+		// It is time to send signatures!
+
+		// Stop normal operation: Ignore interrupts from receiver (PCINT0).
+		CLRBIT(GIMSK, PCIE);		// disable pin change interrupts.
+
+		// Turn off delayed pin change processing if it is enabled et al.
+		if(pin_change_in_10_us >= 0)	// including 0 in test generates better asm.
+			pin_change_in_10_us = 0;
+
+		// By design, the 1st header pulse is a L pulse. To achieve
+		// this, the sender must be H before.  The send state can
+		// savely set here: It is was H already then it is no change
+		// et all (except the side effect that the pulse is not
+		// terminated at regular time).  If it is was L then it is
+		// just a regular pulse termination:
+		send_on();
+
+		signatures_sent = 0;
+		prepare_signature();
+		return;
+	}
+
+	// Set a idefault duration that the last pulse lasts in case
+	// execute_filter() does not call send_single_pulse().
+	send_continue_pulse(rdiv10(500000));	// 500 ms.
+
+	delayed_pin_change_processing();
+
+	// Normal filter operation (indicate from timer, not from a pin_change).
+	execute_filter(0);
 }
 
 void filter_method_v3(register uint8_t pin_change) {
@@ -599,77 +667,191 @@ void filter_passthru(register uint8_t pin_change) {
 	} // else NOP
 }
 
+#ifndef FILTER_V4_DEBUG
+#define FILTER_V4_DEBUG 0
+#endif
+
 void filter_method_v4(register uint8_t pin_change) {
 
-	static const int8_t FILTER_V4_MIN_RAWLEN = 22;	// Must be less then least RAW_LENGTH of 433 protocols
-							// (currently 41 for ninjablocks_weather)
-	// Define ring buffer size as almost large as possibe.  This depends on
-	// available RAM in the target MCU.  Not all of calculates "free" bytes
-	// will be used, at least 8 bytes are left "ununsed" to be on the safe side.
+#if FILTER_V4_DEBUG
+	//----------------------------------------------------------------------------------
+	// How to use debugger:
+	// In the filter(V4)-code, set debug4_value[...] to values you want to examine.
+	// The values are then output as pulse pattern before the sender goes to "sleep" mode.
+	// Beware that the filter-code may run multiple times before debug4_values are output.
+	// After debug4_values are output they are initialized to zero. So its simple to sum
+	// up events, for example.
+	static uint8_t debug4_value[4];	// size must be power of 2, max 16.
+	#define debug4_output_done()	(void)0	    // Replace this by code to prepare next debug round.
 
-	static uint16_t	pulse_ring[
+	// Debug4 implementation:
+	#define msb_mask(all_1_value)	((all_1_value) & ~((all_1_value) >> 1))
+	#define debug4_send_bit_pulse(bit)	send_single_pulse((bit) ? rdiv10(1000) : rdiv10(100))
+	#define debug4_idx_mask		0xF0	    // indicates that the mask (in lower 4 bits) is for debug4_idx.
+	#define debug4_idx_start_mask	(debug4_idx_mask | msb_mask(countof(debug4_value) - 1))
+	#define debug4_output_start()	(void)(debug4_mask = debug4_idx_start_mask)
+	static uint8_t debug4_mask, debug4_idx;
+#else
+	#define debug4_output_start()	(void)0
+	//----------------------------------------------------------------------------------
+#endif
+
+	// This filter is not (only) a low level noise filter. It filters the signals
+	// on application level, namely the pilight application. The filter interprets
+	// the pulse durations and number (pulse train length) like pilight and it
+	// uses application knowledge of which pulse trains are worth to pass the
+	// filter and which to suppress completely.
+	// In order to suppress a pulse train completey, the filter does not send
+	// received pulses immediately but stores their duration in a ring buffer,
+	// analyses them and, if they should pass, sends them later or discards
+	// them in the buffer without sending them. Discarded pulses do not cause
+	// output pin changes which means that the pulse currently being sent lasts
+	// for the duration of discarded pulses.
+	// The decision of which pulse trains pass the filter is made on knowledge
+	// of minimum pulse train length and how to detect a footer pulse which
+	// marks the end of a pulse train:
+
+#define FILTER_V4_MIN_RAWLEN	    22		// Must be less then least RAW_LENGTH of 433 protocols
+						// (currently 41 for ninjablocks_weather)
+#define IS_FOOTER_PULSE		    (recving_since_10_us > rdiv10(5100))
+
+
+	// Define ring buffer size as almost large as possibe.  This depends on
+	// available RAM in the target MCU.  Not all of calculated "free" bytes
+	// will be used to be on the safe side. Further the size must be a power
+	// of two for easy index-wrap-around.
+
+	static uint16_t	pulse_ring[	// the size of the pulse_ring must be power of 2!
 #if TARGET_MCU_attiny85
 
-	    200	// 512 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 432 BYTES --> 216 words -> use 200 for ring buffer.
+	    128	    // 512 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 432 BYTES --> 216 words -> use 128 for ring buffer.
 
 #elif TARGET_MCU_attiny25 
+#undef  FILTER_V4_MIN_RAWLEN			// Must not be larger then ring buffer size...
+#define FILTER_V4_MIN_RAWLEN	    8		// Must be less then least RAW_LENGTH of 433 protocols
 
-	    16	// 128 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 48 BYTES --> 24 words -> use 16 for ring buffer.
+	    16	    // 128 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 48 BYTES --> 24 words -> use 16 for ring buffer.
 
 #else /* assume TARGET_MCU_attiny45 */
 
-	    80	// 256 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 176 BYTES --> 88 words -> use 80 for ring buffer.
+	    64	    // 256 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 176 BYTES --> 88 words -> use 64 for ring buffer.
 
 #endif
 	    ];
-	static int8_t wr_idx, rd_idx, rawlen;	// Note: wr/rd_idx walk through the pulse_ring in reverse order
-						// (from hi to lo values) so boundary check is at zero most of
-						// the time.
+
+#define	PULSE_RING_IDX		(countof(pulse_ring) - 1)	// Bitmask to calc ring buffer index modulo.
+#define PULSE_RING_SLEEP	128	// Must be 1 bit and less then max ring buffer index (127 on attiny 85).
+
+	static uint8_t wr_idx,	// write index; where to store the next received pulse.
+		       rd_idx,	// read index, which pulse to send next.
+		       ts_idx,	// train start index, first pulse of currently receiving train.
+		       rawlen;	// length (number of pulses) of currently receiving pulse train.
+
 	if(pin_change) {
-		if(recving_since_10_us >= MIN_PULSELENGTH
+		if(recving_since_10_us < MIN_PULSELENGTH
 #if ENABLE_HIGH_PASS_FILTER
-		&& recving_since_10_us <= MAX_PULSELENGTH
+		|| recving_since_10_us > MAX_PULSELENGTH
 #endif
-		) {
-			pulse_ring[wr_idx] = recving_since_10_us;
-			if(--wr_idx < 0)
-				wr_idx = countof(pulse_ring) - 1;
+		)
+			return;
 
-			// Here is the filter: if less than FILTER_V4_MIN_RAWLEN pulses are in
-			// the ring (including current) and current is a footer pulse (>5100 us),
-			// then ignore so far rawlen pulses in the ring (rewind).
-			// This means: From the (FILTER_V4_MIN_RAWLEN-1)-th pulse that is not a
-			// footer, start sending pulses from the ring.
-			// Note that using higher MIN_RAWLEN require larger pulse_ring[] buffer
-			// and this space is limited on attiny!
+		pulse_ring[wr_idx] = recving_since_10_us;
+		wr_idx = (wr_idx + 1) & PULSE_RING_IDX;
+		if(rawlen >= FILTER_V4_MIN_RAWLEN-1) {	// enough pulses received.
+			// Send this pulse train.
+			if(rd_idx & PULSE_RING_SLEEP) {
+				// Sender "sleeps", wake it up.
+				rd_idx = ts_idx;
 
-			if(++rawlen >= FILTER_V4_MIN_RAWLEN) {
-				// If not yet started, start reading and sending pulses from ring:
-				if(rd_idx < 0 && (rd_idx = wr_idx + rawlen) >= countof(pulse_ring))
-					rd_idx -= countof(pulse_ring);
-
-				if(recving_since_10_us > rdiv10(5100))
-					rawlen = 0;
+				// Stop sending the current pulse asap:
+				if(sending_since_10_us < ~0 -2)	// prevent overflow
+					send_continue_pulse(sending_since_10_us + 2);
+			}
+#if USE_MANUALLY_OPTIMIZED_CODE
+	// This variant merges the two "if(IS_FOOTER_PULSE)..." code parts (in
+	// the #else path and behind #endif) into one, namely the later one.
+	// This saves some jump ops and results in better asm code.
+			ts_idx = wr_idx;
+		} if (0) {
+#else
+			if(IS_FOOTER_PULSE) {
+				ts_idx = wr_idx;    // pulse train finished, new train starts here.
+				rawlen = 0; // pulse train finished, next pulse starts a new train.
 			} else {
-				if(recving_since_10_us > rdiv10(5100)) {
-					// Not enough pulses. Rewind wr_idx to stop sender as
-					// early as possible (may already send some of the pulses).
-					do if(++wr_idx >= countof(pulse_ring))
-						wr_idx = 0;
-					while(--rawlen > 0 && wr_idx != rd_idx);
-					rawlen = 0;
-				}
+				ts_idx = wr_idx;    // drag the train start index or sender would stop.
+				rawlen++;
 			}
-		}
-	} else if(rd_idx >= 0) {
-		if(rd_idx == wr_idx) {
-			send_single_pulse(0);	// mark pulse end (toggles sender)
-			rd_idx = -1;
+#endif
+		} else if(IS_FOOTER_PULSE) {
+			// Too short pulse train. Do not send.
+			wr_idx = ts_idx;	// rewind to train start index.
+			rawlen = 0; // discard train, next pulse starts a new train.
 		} else {
-			if(send_single_pulse(pulse_ring[rd_idx])) {
-				if(--rd_idx < 0)
-					rd_idx = countof(pulse_ring) - 1;
+			// Just remember and count that pulse.
+			rawlen++;
+		}
+
+	} else {
+		// The last pulse has been completely sent (or was prematurely
+		// stopped when sender was "waked up" while sending a sleeping pulse).
+		if(!(rd_idx & PULSE_RING_SLEEP)) {
+			if(rd_idx != ts_idx) {
+				// More pulses available.
+				send_single_pulse(pulse_ring[rd_idx]);
+				rd_idx = (rd_idx + 1) & PULSE_RING_IDX;
+			} else {
+				// No more pulses.
+				send_single_pulse(rdiv10(500000));   // 0.5 sec
+				rd_idx = PULSE_RING_SLEEP;  // no need to OR it in.
+				debug4_output_start();
 			}
+		} else {
+#if FILTER_V4_DEBUG
+	//----------------------------------------------------------------------------------
+	// Debug4 implementation:
+	// Sleep mode is entered now: Send the values in debug4_value[] coded
+	// as following pulse patterns:
+	// 2 (or 3 or 4) index-bits + 8 value-bits + footer
+	// where a 1-bit is 1000 us, a 0-bit 100 us.
+	// Each sent debug4_value[] is reset to zero.
+	// If all debug4_value are sent, debug4_output_done() is called.
+
+	if((debug4_mask & debug4_idx_mask) == debug4_idx_mask) {
+		// Send the bits of debug4_idx value.
+		debug4_mask &= ~debug4_idx_mask;
+		debug4_send_bit_pulse( debug4_idx & debug4_mask );
+		if((debug4_mask >>= 1) != 0) {
+			// More index bits.
+			debug4_mask |= debug4_idx_mask;
+		} else {
+			// All index bits sent. Send debug4_value[debug4_idx].
+			debug4_mask = 1 << 7;
+		}
+	} else if(debug4_mask == 3) {
+		// Send train-footer and go for the next debug4_idx.
+		send_single_pulse(rdiv10(5500));
+		if(++debug4_idx < countof(debug4_value)) {
+			debug4_mask = debug4_idx_start_mask;
+		} else {
+			// All debug4_value sent. Just terminate our
+			// above sent pulse:
+			debug4_idx = 0;
+			debug4_mask = 5;
+		}
+	} else if(debug4_mask == 5) {
+		send_single_pulse(rdiv10(5500));
+		debug4_mask = 0;
+		debug4_output_done();
+	} else if(debug4_mask) {
+		debug4_send_bit_pulse( debug4_value[debug4_idx] & debug4_mask );
+		if((debug4_mask >>= 1) == 0) {
+			debug4_value[debug4_idx] = 0;
+			debug4_mask = 3;
+		}
+	} else
+	//----------------------------------------------------------------------------------
+#endif
+			send_continue_pulse(rdiv10(500000));
 		}
 	}
 }
@@ -698,7 +880,8 @@ void filter_generate_test_signal(register uint8_t pin_change) {
 		if(pulse == 0) {
 			pulse = 600;
 		}
-		if(send_single_pulse(pulse) && (--dix & 3) == 0) {
+		send_single_pulse(pulse);
+		if((--dix & 3) == 0) {
 			// lsb of 0 is mapped to 600 (is not storable in 8-bit lsb).
 			lsb = lsb ? (lsb >> 1) < 6 ? 0 : (lsb >> 1) : 200;
 			if(lsb == 0) {
@@ -718,7 +901,7 @@ ISR(PCINT0_vect){
 	pin_change ^= (pin_state = PINB);
 
 	if(pin_change & receiver_pin_mask) {
-		if (pin_change_in_10_us < 0) {
+		if(pin_change_in_10_us < 0) {
 			// Old LPF method: immediate pin change processing.
 			execute_filter(pin_change);
 			recving_since_10_us = 0;
@@ -728,7 +911,7 @@ ISR(PCINT0_vect){
 			// away a pulse spike and works transparently to and
 			// for all filter methods. The high pass filtering is
 			// stil  done within filter methods.
-		if (pin_change_in_10_us == 0) {
+		if(pin_change_in_10_us == 0) {
 			// The previous pin change (if any) was processed.
 			// Delay processing of the current pin change a litte
 			// so we can check if this is the start of a spike and
