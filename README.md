@@ -22,12 +22,28 @@ you be warned: this could potentionally damage your raspberry pi and also other 
 	
 	the shortest expected pulse is the minimal base pulse-width of all your protocols
 	the longest expected pulse is the maximal base pulse-width of all your protocols multiplied by 34
+
+	MIN_PULSELENGHT defines where the low pass filter (LPF) starts blocking.
+	Low pass means that low frequencies will pass. Very short pulses are high
+	frequency and will be blocked.
+	MAX_PULSELENGTH defines the high pass filter (HPF) which blocks too low
+	frequency pulses, pulses of long duration.
+
+	Starting with firmware version 6 the high pass filter (HPF) which is defined by
+	MAX_PULSELENGH is disabled. It didn't work very well: The leading edge of the 1st
+	pulse after a longer and silent period would be filtered away by the HPF. But this
+	edge is the start of the first pulse that should be recognized. The firmware sends
+	a signature (round about once every minute) which contains durations of LPF and HPF.
+	In the signature, a disabled HPF is indicated by very high HPF value(s), namely:
+		    32767	- HPF disabled, receiver 1 is selected by default.
+		    32766	- HPF disabled, receiver 1 is explicitly selected.
+		    32765	- HPF disabled, receiver 2 is explicitly selected.
 	
 4. Compile and program ATTiny:
 ------------------------------
-	make all
-	
-	make asm		# generate pilight_firmware.s file (good to review compiler generated assembler code)
+	make help		# Displays all available make targets.
+	make all		# compile and flash the ATTiny using avrdude.
+	make asm		# generate pilight_firmware.s file (good to review compiler generated assembler code).
 	make flash		# compile and flash the ATTiny using pilight-flash on your system.
 
 	type=t85 make ....	# generate firmware for ATTiny 85 (ATTiny25 no longer supported since VERSION 4).
@@ -43,17 +59,17 @@ Additional info:
 I use this circuit without resistors. if you want you can even power the ATTiny with 3.3V, it works for 4 out 5 ATTiny's, but i think the timing is less accurate.
 	![schematic](circuit.png "schematic")
 
-|  Name  | Raspberry Pi V2 | ATTiny45 | 433 Receiver| Notes
-|--------|-----------------|----------|-------------|--------------------
-|  MOSI  |       19        |    5     |      -      | A HI+LO signal on this ATTiny pin selects a different filter method (since version 4).
-|  MISO  |       21        |    6     |      -      |
-|  SCK   |       23        |    7     |      -      |
-| RESET  |       24        |    1     |      -      |
-| PI_IN  | see pilight cfg |    2     |      -      |
-|REC_OUT |       -         |    3     |   DATA_OUT  |
+|  Name  | Raspberry Pi V2+3 | ATTiny45 | 433 Receiver| Notes
+|--------|-------------------|----------|-------------|--------------------
+|  MOSI  |  19   (gpio 10)   |    5     |      -      | firmware-control uses this pin to control the firmware.
+|  MISO  |  21   (gpio  9)   |    6     |      -      | firmware expects input pulses here if receiver 2 is selected (REC2_OUT)
+|  SCK   |  23   (gpio 11)   |    7     |      -      |
+| RESET  |  24   (gpio  8)   |    1     |      -      |
+| PI_IN  | see pilight cfg   |    2     |      -      | Firmware outputs filtered pulses here.
+|REC_OUT |       -           |    3     |   DATA_OUT  | Firmware expects input pulses here (default receiver 1).
 
 
-to change the pins create an .avrduderc file in your home directory containing (the numbering is wiringpi numbering!):
+to change the pins create an .avrduderc file in your home directory containing (the numbering is gpio numbering!):
 
 
 	programmer
@@ -66,11 +82,26 @@ to change the pins create an .avrduderc file in your home directory containing (
 		miso  = 9;
 	;
 
+###firmware-control
+
+Since version 4, the firmware has a number of operation modes that can be selected without
+flashing by using the firmware-control program. Most operation modes select filter method(s)
+that the firmware should perform.
+
+Since version 6 it is also possible to connect two RF pulse receivers to the ATTiny: the
+default receiver 1 on Attiny pin 3 and a receiver 2 on Attiny pin 6. The firmware can be
+configuted to watch receiver 1 or to watch receiver 2. The receiver 2 pin could be connected
+to a real RF receiver or, most likely, to a raspi gpio pin, which is normally the case if
+you have the Attiny wired for flashing. In this case it is possible to test and debug the
+firmware by feeding it with artificially generated, well known pulses. The pulsi program
+can be used to generate such pulses.
+
 ###FilterMethods
 
 Since version 4, the firmware implements four different filter methods that can be selected
-in normal operation and without flashing by signalling a HI+LO on ATTiny pin 5. After going
-LO the ATTiny sends a signature in about 500 microseconds.
+in normal operation and without flashing by signalling HI+LO on ATTiny pin 5. After going
+LO the ATTiny sends a signature in about 500 microseconds. Since version 5 there are more
+pulse patterns for pin 5 that firmware-control uses to select other operation modes.
 
 The version 4 signature contains the selected filter method in the version
 number like this: if
@@ -162,16 +193,10 @@ Output of signals is done by turning the output pin on (H, send_on()) or off
 (L, send_off()) or toggle its current state (send_toggle()). Filter methods may
 call send_on() or send_off() directly and if they do, have to care for correct
 duration themself. Instead they can just call send_single_pulse(duration_10_us)
-repeatedly (not in a private loop but each time the method is called itself).
-send_single_pulse() returns true if the pulse was completely sent.  In this
-case the filter method should look for a new duration that it will use next
-time when calling send_single_pulse(). As long as send_single_pulse() returns
-false it must be called with the same duration value all the time.
+repeatedly (not in a private loop but once each time the filter method is called).
 
-A filter method implementation should prevent introducing global (or static)
-variables because this limits the available RAM that can be used for the ring
-buffer of filter method 4. Instead filter method implementations should try
-to re-use some global variables of the signature sender.
+A filter method implementation may prevent introducing global (or static)
+variables by re-usng some global variables of the signature sender.
 
 The signature sender stops filter processing - it even disables pin change
 interrupts et all.
