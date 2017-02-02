@@ -711,8 +711,11 @@ void filter_method_v4(register uint8_t pin_change) {
 	// of minimum pulse train length and how to detect a footer pulse which
 	// marks the end of a pulse train:
 
-#define FILTER_V4_MIN_RAWLEN	    22		// Must be less then least RAW_LENGTH of 433 protocols
+#define FILTER_V4_MAX_RAWLEN	    40		// Must be less then least RAW_LENGTH of 433 protocols
 						// (currently 41 for ninjablocks_weather)
+						// The actual raw length used by the filter depends on
+						// availabe ring buffer size which in turn depends on
+						// the target MCU type.
 #define IS_FOOTER_PULSE		    (recving_since_10_us > rdiv10(5100))
 
 
@@ -723,21 +726,26 @@ void filter_method_v4(register uint8_t pin_change) {
 
 	static uint16_t	pulse_ring[	// the size of the pulse_ring must be power of 2!
 #if TARGET_MCU_attiny85
+#define FILTER_V4_MIN_RAWLEN	    36
 
 	    128	    // 512 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 432 BYTES --> 216 words -> use 128 for ring buffer.
 
-#elif TARGET_MCU_attiny25 
-#undef  FILTER_V4_MIN_RAWLEN			// Must not be larger then ring buffer size...
-#define FILTER_V4_MIN_RAWLEN	    8		// Must be less then least RAW_LENGTH of 433 protocols
+#elif TARGET_MCU_attiny25
+#define FILTER_V4_MIN_RAWLEN	    6
 
 	    16	    // 128 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 48 BYTES --> 24 words -> use 16 for ring buffer.
 
 #else /* assume TARGET_MCU_attiny45 */
+#define FILTER_V4_MIN_RAWLEN	    26
 
 	    64	    // 256 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 176 BYTES --> 88 words -> use 64 for ring buffer.
 
 #endif
 	    ];
+
+#if FILTER_V4_MIN_RAWLEN >= FILTER_V4_MAX_RAWLEN
+#error FILTER_V4_MIN_RAWLEN exceeds maximum value.
+#endif
 
 #define	PULSE_RING_IDX		(countof(pulse_ring) - 1)	// Bitmask to calc ring buffer index modulo.
 #define PULSE_RING_SLEEP	128	// Must be 1 bit and above max ring buffer index (127 on attiny 85).

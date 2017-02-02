@@ -37,7 +37,9 @@ help :
 	@echo "\terase  : Set $(MCU)(??) fuses using $(AVRDUDE)"
 	@echo "\tflash  : Compile and Flash $(MCU) using $(PILIGHT_FLASH)"
 	@echo "\tcompile: Compile and generate $(MCU) .hex file that can be flashed."
+	@echo "\tcompile-all: Compile and generate .hex file for all ATTiny 25,45 and 85."
 	@echo "\tasm    : Compile and generate .s file to inspect generated code."
+	@echo "\tpulsi  : Create the stand-alone pulse generator pulsi."
 	@echo "\tclean  : Remove files that can be regenerated."
 
 program : $(TARGET)_$(AVRDUDEMCU).hex
@@ -78,7 +80,7 @@ pulsi: pulsi.c
 	gcc pulsi.c -o pulsi
 
 deploy: compile-all pulsi
-	mkdir -p -p deployed/$(TIMESTAMP)
+	mkdir -p deployed/$(TIMESTAMP)
 	cp $(TARGET)*.hex $(TARGET).c firmware-control pulsi pulsi.c [Mm]akefile deployed/$(TIMESTAMP)
 	cd deployed/$(TIMESTAMP) && zip firmware-$(shell date +"%Y%m%d%H").zip $(TARGET)*.hex firmware-control pulsi
 
