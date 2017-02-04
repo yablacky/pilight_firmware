@@ -230,7 +230,7 @@ void calc_checksum(register uint8_t filter_idx)
 	payload_checksum = (ver + lpf + hpf) & 0xf;
 }
 
-static filter_method_t get_filter_method(register uint8_t filter_idx)
+filter_method_t get_filter_method(register uint8_t filter_idx)
 {
 	// The filter index of current execute_filter is store in EEPROM so that
 	// it remains after power off.
@@ -259,6 +259,7 @@ void firmware_control(register uint8_t pin_change)
 	#define	pin_change_count		payload_nbits
 	#define control_value			payload_value
 	if(!pin_change) {
+#if ! TARGET_MCU_attiny25
 		// If a valid filter index is stored in EEPROM then establish that filter.
 		uint8_t filter_idx, cs = 0;
 		cs ^= (filter_idx = EEPROM_read_byte(FW_EEPROM_ADDR_FILTER_METHOD));
@@ -272,9 +273,11 @@ void firmware_control(register uint8_t pin_change)
 				calc_checksum(filter_idx + 1);
 			}
 		}
+#endif
 		return;
 	}
 	// Control pin changed.
+#if ! TARGET_MCU_attiny25
 	// Since we get here, the signature sender is not active (it would have
 	// disabled the interrupt that lead us here). So we can re-use the signature
 	// timer to measure timing of firmware control pin changes and thereby
@@ -410,6 +413,7 @@ void firmware_control(register uint8_t pin_change)
 			EEPROM_write_byte(FW_EEPROM_ADDR_CHECKSUM, (cs ^= filter_idx));
 		}
 	}
+#endif
 	// Finally tell soon what we have now.
 	signature_in_10_us = rdiv10(1000);	// in 1 ms.
 }
@@ -731,7 +735,7 @@ void filter_method_v4(register uint8_t pin_change) {
 	    128	    // 512 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 432 BYTES --> 216 words -> use 128 for ring buffer.
 
 #elif TARGET_MCU_attiny25
-#define FILTER_V4_MIN_RAWLEN	    6
+#define FILTER_V4_MIN_RAWLEN	    9
 
 	    16	    // 128 SRAM - 32 STACK - (~~12*4) GLOBAL VARS = 48 BYTES --> 24 words -> use 16 for ring buffer.
 
